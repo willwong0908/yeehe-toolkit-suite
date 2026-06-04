@@ -1156,13 +1156,12 @@ INDEX_HTML = """<!doctype html>
         </div>
       </div>
       <nav class="sidebar-nav">
-        <div class="nav-group">
-          <div class="nav-submenu">
-            <button class="nav-link nav-link-sub" data-page-target="modelSettingsPage">模型设置</button>
-          </div>
-        </div>
-        <div class="nav-group">
-          <div class="nav-group-title">文本预处理工具</div>
+        <button class="nav-link nav-link-top" data-page-target="modelSettingsPage">模型设置</button>
+
+        <details class="nav-accordion" open data-accordion-key="text-preprocess">
+          <summary class="nav-accordion-summary">
+            <span class="nav-group-title">文本预处理工具</span>
+          </summary>
           <div class="nav-submenu">
             <button class="nav-link nav-link-sub active" data-page-target="overviewPage">总览</button>
             <button class="nav-link nav-link-sub" data-page-target="modelStageSettingsPage">模型阶段设置</button>
@@ -1171,27 +1170,46 @@ INDEX_HTML = """<!doctype html>
             <button class="nav-link nav-link-sub" data-page-target="runDetailsPage">运行详情</button>
             <button class="nav-link nav-link-sub" data-page-target="resultsPage">结果</button>
           </div>
-        </div>
-        <div class="nav-group">
-          <div class="nav-group-title">Diff 工具</div>
+        </details>
+
+        <details class="nav-accordion" data-accordion-key="diff-tool">
+          <summary class="nav-accordion-summary">
+            <span class="nav-group-title">Diff 工具</span>
+          </summary>
           <div class="nav-submenu">
             <button class="nav-link nav-link-sub nav-link-placeholder" type="button" disabled>功能预留</button>
           </div>
-        </div>
-        <div class="nav-group">
-          <div class="nav-group-title">AI 审校工具</div>
+        </details>
+
+        <details class="nav-accordion" data-accordion-key="ai-review-tool">
+          <summary class="nav-accordion-summary">
+            <span class="nav-group-title">AI 审校工具</span>
+          </summary>
           <div class="nav-submenu">
             <button class="nav-link nav-link-sub nav-link-placeholder" type="button" disabled>功能预留</button>
           </div>
-        </div>
+        </details>
+
+        <details class="nav-accordion" data-accordion-key="cross-excel-search">
+          <summary class="nav-accordion-summary">
+            <span class="nav-group-title">跨Excel搜索与合并</span>
+          </summary>
+          <div class="nav-submenu">
+            <button class="nav-link nav-link-sub nav-link-placeholder" type="button" disabled>功能预留</button>
+          </div>
+        </details>
       </nav>
       <div class="sidebar-status">
-        <small class="status-caption">当前任务</small>
-        <strong id="taskTypeLabel">文本预处理工具</strong>
-        <small class="status-caption">任务状态</small>
-        <span id="statusPill" class="pill">空闲</span>
-        <strong id="stageLabel">未启动</strong>
-        <small id="statusMessage">等待开始任务</small>
+        <div class="status-block">
+          <small class="status-caption">当前任务</small>
+          <strong id="taskTypeLabel">文本预处理工具</strong>
+        </div>
+        <div class="status-block">
+          <small class="status-caption">任务状态</small>
+          <span id="statusPill" class="pill">空闲</span>
+          <strong id="stageLabel">未启动</strong>
+          <small id="statusMessage">等待开始任务</small>
+        </div>
         <small class="service-tip">服务地址：<code>http://127.0.0.1:8765</code></small>
       </div>
     </aside>
@@ -1682,16 +1700,48 @@ body {
 }
 .brand strong { display:block; font-size: 18px; line-height: 1.2; }
 .brand small { color: var(--muted); line-height: 1.3; }
-.sidebar-nav { display: grid; gap: 18px; margin-bottom: 22px; }
+.sidebar-nav { display: grid; gap: 12px; margin-bottom: 22px; }
 .nav-group { display: grid; gap: 8px; }
 .nav-group-title {
-  padding: 0 6px;
+  padding: 0;
   color: var(--ink);
   font-size: 18px;
   font-weight: 800;
   line-height: 1.25;
 }
-.nav-submenu { display: grid; gap: 8px; }
+.nav-accordion {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255,255,255,.52);
+  overflow: hidden;
+}
+.nav-accordion[open] {
+  background: rgba(255,255,255,.82);
+  box-shadow: 0 10px 24px rgba(22, 32, 51, 0.08);
+}
+.nav-accordion-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+  list-style: none;
+}
+.nav-accordion-summary::-webkit-details-marker { display: none; }
+.nav-accordion-summary::after {
+  content: "+";
+  color: var(--muted);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+}
+.nav-accordion[open] .nav-accordion-summary::after { content: "-"; }
+.nav-submenu {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
 .nav-link {
   width: 100%;
   justify-content: flex-start;
@@ -1704,6 +1754,16 @@ body {
   border-radius: 12px;
   font-weight: 700;
 }
+.nav-link-top {
+  min-height: 52px;
+  padding: 0 16px;
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--ink);
+  background: rgba(255,255,255,.78);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
 .nav-link-sub { padding-left: 18px; font-size: 15px; }
 .nav-link-placeholder {
   opacity: 0.58;
@@ -1713,11 +1773,21 @@ body {
 .nav-link.active, .nav-link:hover { background: #e7f1ef; color: var(--primary-strong); }
 .sidebar-status {
   display: grid;
-  gap: 8px;
+  gap: 12px;
   padding: 16px;
   background: rgba(255,255,255,.78);
   border: 1px solid var(--line);
   border-radius: 18px;
+}
+.status-block {
+  display: grid;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(219,228,239,.9);
+}
+.status-block:last-of-type {
+  padding-bottom: 0;
+  border-bottom: 0;
 }
 .status-caption {
   color: var(--muted);
@@ -2177,6 +2247,14 @@ const PAGE_TASK_LABELS = {
   runDetailsPage: "文本预处理工具",
   resultsPage: "文本预处理工具",
 };
+const PAGE_ACCORDION_KEYS = {
+  overviewPage: "text-preprocess",
+  modelStageSettingsPage: "text-preprocess",
+  nontransSettingsPage: "text-preprocess",
+  promptSettingsPage: "text-preprocess",
+  runDetailsPage: "text-preprocess",
+  resultsPage: "text-preprocess",
+};
 
 function setPage(pageId) {
   document.querySelectorAll(".page-section").forEach((section) => {
@@ -2186,6 +2264,11 @@ function setPage(pageId) {
     button.classList.toggle("active", button.dataset.pageTarget === pageId);
   });
   $("taskTypeLabel").textContent = PAGE_TASK_LABELS[pageId] || "文本预处理工具";
+  const activeAccordionKey = PAGE_ACCORDION_KEYS[pageId] || "";
+  document.querySelectorAll(".nav-accordion").forEach((accordion) => {
+    if (!accordion.dataset.accordionKey) return;
+    accordion.open = accordion.dataset.accordionKey === activeAccordionKey;
+  });
   if (pageId === "nontransSettingsPage" && pendingRuleState.show_library_dot) {
     markPendingRuleSeen({ library_seen: true }).catch(() => {});
   }
