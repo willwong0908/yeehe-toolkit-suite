@@ -1,10 +1,10 @@
 $ErrorActionPreference = "Stop"
 Set-Location -LiteralPath $PSScriptRoot
 
-$host.UI.RawUI.WindowTitle = "AI Term Extractor WebUI"
+$host.UI.RawUI.WindowTitle = "译禾工具合集"
 
 Write-Host "==============================================" -ForegroundColor DarkGray
-Write-Host "AI Term Extractor WebUI" -ForegroundColor Cyan
+Write-Host "译禾工具合集" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "URL: http://127.0.0.1:8765" -ForegroundColor Green
 Write-Host "State: starting" -ForegroundColor Yellow
@@ -27,8 +27,5 @@ try {
     }
 }
 finally {
-    Write-Host ""
-    Write-Host "WebUI stopped." -ForegroundColor Yellow
-    Write-Host "Press Enter to close this window..."
-    [void](Read-Host)
+    exit $LASTEXITCODE
 }

@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict
 if __package__:
     from .constants import APP_VERSION, UPDATE_ASSET_NAME_HINTS, UPDATE_RELEASE_API
     from .core import scan_folder
+    from .cross_excel import merge_excel_files_by_headers, scan_cross_excel_folder, search_excel_rows
     from .models import TaskInput, normalize_extraction_mode, sync_extraction_flags
     from .nontrans import (
         NONTRANS_ELEMENT_TYPE_LABELS,
@@ -47,6 +48,11 @@ else:
         sys.path.insert(0, str(package_root))
     from term_extractor_app.constants import APP_VERSION, UPDATE_ASSET_NAME_HINTS, UPDATE_RELEASE_API
     from term_extractor_app.core import scan_folder
+    from term_extractor_app.cross_excel import (
+        merge_excel_files_by_headers,
+        scan_cross_excel_folder,
+        search_excel_rows,
+    )
     from term_extractor_app.models import TaskInput, normalize_extraction_mode, sync_extraction_flags
     from term_extractor_app.nontrans import (
         NONTRANS_ELEMENT_TYPE_LABELS,
@@ -165,6 +171,18 @@ class PromptTemplateResetPayload(BaseModel):
 
 class AppUpdateStartPayload(BaseModel):
     force: bool = False
+
+
+class CrossExcelSearchPayload(BaseModel):
+    folder_path: str
+    query: str
+    limit: int = 300
+
+
+class CrossExcelMergePayload(BaseModel):
+    folder_path: str
+    headers: list[str]
+    apply_format: bool = True
 
 
 PROMPT_TEMPLATE_META = [
@@ -1022,6 +1040,31 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return {"folder_path": folder_path, "cancelled": not bool(folder_path)}
 
+    @app.get("/api/cross-excel/scan")
+    async def cross_excel_scan(folder_path: str):
+        try:
+            return scan_cross_excel_folder(folder_path)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/cross-excel/search")
+    async def cross_excel_search(payload: CrossExcelSearchPayload):
+        try:
+            return search_excel_rows(payload.folder_path, payload.query, payload.limit)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/cross-excel/merge")
+    async def cross_excel_merge(payload: CrossExcelMergePayload):
+        try:
+            return merge_excel_files_by_headers(
+                payload.folder_path,
+                payload.headers,
+                apply_format=payload.apply_format,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.post("/api/tasks/start")
     async def start_task(payload: StartTaskPayload):
         settings = task_facade.load_settings()
@@ -1095,6 +1138,17 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return {"ok": True, "folder": str(path.parent)}
 
+    @app.post("/api/results/open-file")
+    async def open_result_file(output_file: str):
+        path = Path(output_file)
+        if not path.exists() or not path.is_file():
+            raise HTTPException(status_code=404, detail="Output file does not exist.")
+        try:
+            open_file_directly(path)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"ok": True, "file": str(path)}
+
     return app
 
 
@@ -1113,6 +1167,16 @@ def open_file_location(path: Path) -> None:
         subprocess.Popen([opener, str(path.parent)])
     else:
         raise RuntimeError("Opening folders is not supported on this platform.")
+
+
+def open_file_directly(path: Path) -> None:
+    if os.name == "nt":
+        os.startfile(str(path))  # type: ignore[attr-defined]
+    elif os.name == "posix":
+        opener = "open" if sys_platform_is_darwin() else "xdg-open"
+        subprocess.Popen([opener, str(path)])
+    else:
+        raise RuntimeError("Opening files is not supported on this platform.")
 
 
 def sys_platform_is_darwin() -> bool:
@@ -1148,11 +1212,11 @@ INDEX_HTML = """<!doctype html>
   <div class="shell">
     <aside class="sidebar">
       <div class="brand">
-        <img class="brand-mark" src="/assets/logo.png" alt="文本预处理工具" />
+        <img class="brand-mark" src="/assets/logo.png" alt="译禾工具合集" />
         <div class="brand-copy">
           <span class="brand-version">v__APP_VERSION__</span>
-          <strong>文本预处理工具</strong>
-          <small>术语与非译元素</small>
+          <strong>译禾工具合集</strong>
+          <small>作者：王子京</small>
         </div>
       </div>
       <nav class="sidebar-nav">
@@ -1195,7 +1259,7 @@ INDEX_HTML = """<!doctype html>
             <span class="nav-group-title">跨Excel搜索与合并</span>
           </summary>
           <div class="nav-submenu">
-            <button class="nav-link nav-link-sub nav-link-placeholder" type="button" disabled>功能预留</button>
+            <button class="nav-link nav-link-sub" data-page-target="crossExcelPage">搜索与合并</button>
           </div>
         </details>
       </nav>
@@ -1218,10 +1282,8 @@ INDEX_HTML = """<!doctype html>
       <header class="hero">
         <div>
           <p class="eyebrow">WebUI</p>
-          <h1>开始任务</h1>
-          <p class="lede">先选择目录，再开始提取。</p>
-        </div>
-        <div class="hero-side">
+          <h1 id="heroTitle">文本预处理工具</h1>
+          <p id="heroLede" class="lede">用于提取术语、识别非译元素，并整理文本预处理结果。</p>
           <button id="updateNoticeButton" class="notice-button update-notice-button" type="button" hidden>
             <span class="notice-dot"></span>
             <span>发现新版本</span>
@@ -1230,21 +1292,10 @@ INDEX_HTML = """<!doctype html>
             <span class="notice-dot"></span>
             <span>发现新的非译规则</span>
           </button>
-          <div class="hero-card">
-            <div class="hero-card-label">当前状态</div>
-            <strong id="heroStateText">未启动</strong>
-            <small>服务启动后可以随时回到这里查看状态。</small>
-          </div>
         </div>
       </header>
 
       <section id="overviewPage" class="page-section active">
-        <div class="section-header">
-          <div>
-            <h2>总览</h2>
-            <p></p>
-          </div>
-        </div>
         <div class="grid dashboard-grid">
           <section class="card">
             <div class="card-title">
@@ -1324,12 +1375,6 @@ INDEX_HTML = """<!doctype html>
       </section>
 
       <section id="modelSettingsPage" class="page-section">
-        <div class="section-header">
-          <div>
-            <h2>模型设置</h2>
-            <p></p>
-          </div>
-        </div>
         <section class="card">
           <div class="card-title">
             <h3>通用模型</h3>
@@ -1350,12 +1395,6 @@ INDEX_HTML = """<!doctype html>
       </section>
 
       <section id="modelStageSettingsPage" class="page-section">
-        <div class="section-header">
-          <div>
-            <h2>模型阶段设置</h2>
-            <p>分别控制非译元素、术语召回和术语校验阶段。</p>
-          </div>
-        </div>
         <div class="stage-grid">
           <section class="card compact-card">
             <div class="card-title">
@@ -1391,12 +1430,6 @@ INDEX_HTML = """<!doctype html>
       </section>
 
       <section id="nontransSettingsPage" class="page-section">
-        <div class="section-header">
-          <div>
-            <h2>非译元素设置</h2>
-            <p></p>
-          </div>
-        </div>
         <div class="subnav">
           <button class="subnav-link active" data-subtab-group="nontrans" data-subtab-target="nontransRulePanel">宽泛检测规则</button>
           <button class="subnav-link" data-subtab-group="nontrans" data-subtab-target="nontransBuiltinPanel">内置规则库</button>
@@ -1486,12 +1519,6 @@ INDEX_HTML = """<!doctype html>
       </section>
 
       <section id="promptSettingsPage" class="page-section">
-        <div class="section-header">
-          <div>
-            <h2>提示词设置</h2>
-            <p></p>
-          </div>
-        </div>
         <div class="subnav">
           <button class="subnav-link active" data-subtab-group="prompt" data-subtab-target="promptRecallPanel">术语召回</button>
           <button class="subnav-link" data-subtab-group="prompt" data-subtab-target="promptReviewPanel">术语校验</button>
@@ -1510,12 +1537,6 @@ INDEX_HTML = """<!doctype html>
       </section>
 
       <section id="runDetailsPage" class="page-section">
-        <div class="section-header">
-          <div>
-            <h2>运行详情</h2>
-            <p></p>
-          </div>
-        </div>
         <section class="card">
           <div class="stats-panel">
             <div class="stats-title">任务统计</div>
@@ -1554,12 +1575,6 @@ INDEX_HTML = """<!doctype html>
       </section>
 
       <section id="resultsPage" class="page-section">
-        <div class="section-header">
-          <div>
-            <h2>结果</h2>
-            <p></p>
-          </div>
-        </div>
         <div class="grid two">
           <section class="card">
             <div class="card-title">
@@ -1585,6 +1600,96 @@ INDEX_HTML = """<!doctype html>
               <div><span>术语库</span><strong id="resultTermCountMirror">0</strong></div>
               <div><span>失败记录</span><strong id="resultFailureCountMirror">0</strong></div>
               <div><span>非译元素正则</span><strong id="resultRegexCountMirror">0</strong></div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="crossExcelPage" class="page-section">
+        <div class="grid dashboard-grid">
+          <section class="card">
+            <div class="card-title">
+              <h3>搜索范围</h3>
+              <p>选择目录后可扫描全部 Excel 文件并加载表头。</p>
+            </div>
+            <div class="grid two">
+              <label>输入目录
+                <span class="secret-field">
+                  <input id="crossExcelFolderPath" placeholder="D:\\项目\\Excel目录" />
+                  <button id="chooseCrossExcelFolderButton" class="mini-button" type="button">选择文件夹</button>
+                </span>
+              </label>
+              <div class="cross-summary-box">
+                <span>文件数</span>
+                <strong id="crossExcelFileCount">0</strong>
+                <small id="crossExcelScanHint">请先选择目录并扫描。</small>
+              </div>
+            </div>
+            <div class="actions">
+              <button id="scanCrossExcelButton" class="secondary">扫描目录</button>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-title">
+              <h3>全局搜索</h3>
+              <p>输入关键词后，再预览命中的整行内容。</p>
+            </div>
+            <div class="grid two">
+              <label>搜索内容
+                <span class="search-inline-field">
+                  <input id="crossExcelQuery" placeholder="输入要搜索的文字" />
+                  <button id="searchCrossExcelButton" class="primary" type="button">搜索</button>
+                </span>
+              </label>
+              <label>结果上限<input id="crossExcelLimit" type="number" min="1" max="2000" value="300" /></label>
+            </div>
+            <div class="actions action-row-compact">
+              <span id="crossExcelSearchHint" class="hint"></span>
+            </div>
+            <div class="summary-line">
+              <span>命中结果 <strong id="crossExcelMatchCount">0</strong></span>
+              <span>扫描行数 <strong id="crossExcelScannedRows">0</strong></span>
+              <span>状态 <strong id="crossExcelTruncatedLabel">未搜索</strong></span>
+            </div>
+          </section>
+        </div>
+
+        <div class="grid dashboard-grid">
+          <section class="card">
+            <div class="card-title">
+              <h3>搜索预览</h3>
+              <p>按整行展示。点击单元格即可复制内容。</p>
+            </div>
+            <div id="crossExcelSearchResults" class="cross-search-results">
+              <div class="cross-empty-state">执行搜索后，这里会显示命中的行。</div>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-title">
+              <h3>按表头合并</h3>
+              <p>勾选需要保留的表头，再导出合并结果。</p>
+            </div>
+            <div class="actions">
+              <button id="selectAllCrossHeadersButton" class="secondary" type="button">全选</button>
+              <button id="clearCrossHeadersButton" class="secondary" type="button">清空</button>
+              <button id="mergeCrossExcelButton" class="primary" type="button">合并</button>
+            </div>
+            <div id="crossExcelHeaderList" class="cross-header-list">
+              <div class="cross-empty-state">扫描目录后会在这里显示全部表头。</div>
+            </div>
+            <div class="actions action-row-compact cross-merge-actions">
+              <label class="check"><input id="crossExcelApplyFormat" type="checkbox" checked /> 保留单元格格式</label>
+            </div>
+            <div class="result-file">
+              <span>合并结果</span>
+              <strong id="crossExcelOutputFile">暂无输出</strong>
+              <small id="crossExcelOutputHint">合并结果会保存到工具 output 目录。</small>
+            </div>
+            <div class="actions">
+              <button id="openCrossExcelOutputFileButton" class="secondary" type="button" disabled>打开文件</button>
+              <button id="openCrossExcelOutputButton" class="secondary" type="button" disabled>打开输出目录</button>
             </div>
           </section>
         </div>
@@ -1704,77 +1809,94 @@ body {
 .nav-group { display: grid; gap: 8px; }
 .nav-group-title {
   padding: 0;
-  color: var(--ink);
-  font-size: 18px;
-  font-weight: 800;
+  color: #24364d;
+  font-size: 14px;
+  font-weight: 700;
   line-height: 1.25;
+  letter-spacing: 0.02em;
 }
 .nav-accordion {
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: rgba(255,255,255,.52);
+  border: 1px solid rgba(209, 220, 234, 0.9);
+  border-radius: 16px;
+  background: rgba(255,255,255,.64);
   overflow: hidden;
+  box-shadow: 0 8px 22px rgba(22, 32, 51, 0.04);
 }
 .nav-accordion[open] {
-  background: rgba(255,255,255,.82);
-  box-shadow: 0 10px 24px rgba(22, 32, 51, 0.08);
+  background: rgba(255,255,255,.9);
+  box-shadow: 0 14px 28px rgba(22, 32, 51, 0.08);
 }
 .nav-accordion-summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 14px 16px;
+  padding: 12px 14px;
   cursor: pointer;
   list-style: none;
 }
 .nav-accordion-summary::-webkit-details-marker { display: none; }
 .nav-accordion-summary::after {
   content: "+";
-  color: var(--muted);
-  font-size: 20px;
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 15px;
   font-weight: 700;
   line-height: 1;
 }
 .nav-accordion[open] .nav-accordion-summary::after { content: "-"; }
 .nav-submenu {
   display: grid;
-  gap: 8px;
-  padding: 0 12px 12px;
+  gap: 6px;
+  padding: 0 10px 10px;
 }
 .nav-link {
   width: 100%;
   justify-content: flex-start;
-  min-height: 44px;
+  min-height: 40px;
   background: transparent;
-  color: var(--muted);
+  color: #526277;
   border: 0;
   text-align: left;
   padding: 0 14px;
   border-radius: 12px;
-  font-weight: 700;
+  font-weight: 600;
+  transition: background .18s ease, color .18s ease, transform .18s ease;
 }
 .nav-link-top {
-  min-height: 52px;
-  padding: 0 16px;
-  font-size: 22px;
-  font-weight: 800;
-  color: var(--ink);
-  background: rgba(255,255,255,.78);
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow);
+  min-height: 46px;
+  padding: 0 14px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #203248;
+  background: rgba(255,255,255,.72);
+  border: 1px solid rgba(209, 220, 234, 0.95);
+  box-shadow: 0 8px 20px rgba(22, 32, 51, 0.05);
 }
-.nav-link-sub { padding-left: 18px; font-size: 15px; }
+.nav-link-sub {
+  padding-left: 14px;
+  font-size: 14px;
+  min-height: 38px;
+}
 .nav-link-placeholder {
   opacity: 0.58;
   border: 1px dashed #cbd8e6;
   background: rgba(237,243,248,.45);
 }
-.nav-link.active, .nav-link:hover { background: #e7f1ef; color: var(--primary-strong); }
+.nav-link.active, .nav-link:hover {
+  background: linear-gradient(180deg, #ecf7f5 0%, #e2f0ed 100%);
+  color: var(--primary-strong);
+}
+.nav-link:hover { transform: translateY(-1px); }
 .sidebar-status {
   display: grid;
   gap: 12px;
-  padding: 16px;
+  padding: 14px;
   background: rgba(255,255,255,.78);
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -1818,6 +1940,12 @@ body {
 .hero-card { padding: 22px; display: grid; align-content: center; gap: 10px; }
 .hero-card strong { font-size: 26px; }
 .hero-card-label { color: var(--muted); font-weight: 700; }
+.hero-card-meta {
+  color: #607287;
+  font-size: 13px;
+  line-height: 1.55;
+  padding-top: 2px;
+}
 .pill { width: max-content; padding: 7px 11px; border-radius: 999px; background: #e7f1ef; color: var(--primary-strong); font-weight: 800; }
 .pill.running { background: #fff2cc; color: #865d10; }
 .pill.failed { background: #fde5e2; color: var(--danger); }
@@ -1854,13 +1982,21 @@ body {
 .section-header p { margin: 6px 0 0; color: var(--muted); }
 .subnav { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
 .subnav-link {
-  min-height: 38px;
+  min-height: 36px;
   padding: 0 14px;
-  background: #edf3f8;
-  color: var(--muted);
+  background: #f3f6fa;
+  color: #617288;
   border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  border: 1px solid #dbe4ef;
 }
-.subnav-link.active { background: #e7f1ef; color: var(--primary-strong); }
+.subnav-link.active {
+  background: #ffffff;
+  color: var(--primary-strong);
+  border-color: #bfddd7;
+  box-shadow: 0 8px 18px rgba(31, 111, 104, 0.08);
+}
 .link-with-dot,
 .section-title-with-dot {
   display: inline-flex;
@@ -1898,12 +2034,30 @@ input, select {
   color: var(--ink);
   font: inherit;
 }
+.search-inline-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+.search-inline-field input {
+  min-width: 0;
+}
 .secret-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
 .secret-field input { min-width: 0; }
 .mini-button { min-height: 42px; padding: 0 14px; background: #e6edf5; color: #25364c; border: 1px solid #cbd8e6; }
 .check { display: flex; align-items: center; gap: 9px; color: var(--ink); }
 .check input { width: 18px; min-height: 18px; }
 .actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
+.action-row-compact {
+  margin-top: 12px;
+  align-items: center;
+}
+.action-row-compact .hint {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+}
 .sticky-actions {
   position: sticky;
   bottom: 18px;
@@ -1919,17 +2073,32 @@ input, select {
   box-shadow: var(--shadow);
 }
 button {
-  min-height: 42px;
+  min-height: 40px;
   border: 0;
-  border-radius: 13px;
-  padding: 0 18px;
+  border-radius: 12px;
+  padding: 0 16px;
   font: inherit;
-  font-weight: 800;
+  font-weight: 700;
   cursor: pointer;
+  transition: transform .18s ease, box-shadow .18s ease, background .18s ease, color .18s ease;
 }
-button.primary { background: var(--primary); color: white; }
-button.secondary { background: #e6edf5; color: #25364c; }
-button.danger { background: #fde5e2; color: var(--danger); }
+button.primary {
+  background: linear-gradient(180deg, #2d8a80 0%, #1f6f68 100%);
+  color: white;
+  box-shadow: 0 10px 20px rgba(31, 111, 104, 0.18);
+}
+button.secondary {
+  background: #f5f8fb;
+  color: #304257;
+  border: 1px solid #d7e1ec;
+}
+button.danger { background: #fff1ef; color: var(--danger); border: 1px solid #f2d1cc; }
+button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+button.primary:hover:not(:disabled) {
+  box-shadow: 0 14px 24px rgba(31, 111, 104, 0.22);
+}
 button:disabled { opacity: .58; cursor: not-allowed; }
 .error-panel {
   display: grid;
@@ -1991,7 +2160,14 @@ button:disabled { opacity: .58; cursor: not-allowed; }
 .pattern-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .pattern-actions button { min-height: 34px; padding: 0 10px; }
 .summary-line { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; color: var(--muted); font-weight: 700; }
-.summary-line span { padding: 9px 12px; border: 1px solid var(--line); border-radius: 999px; background: #f7fafc; }
+.summary-line span {
+  padding: 8px 12px;
+  border: 1px solid #dbe4ef;
+  border-radius: 999px;
+  background: #f8fbfd;
+  color: #607287;
+  font-size: 13px;
+}
 .summary-line strong { color: var(--ink); }
 .update-leaving-screen {
   min-height: 100vh;
@@ -2066,6 +2242,128 @@ button:disabled { opacity: .58; cursor: not-allowed; }
   color: #d7e4f5;
   overflow: auto;
   font-size: 13px;
+}
+.cross-summary-box {
+  display: grid;
+  gap: 6px;
+  align-content: center;
+  min-height: 100%;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #f7fafc;
+}
+.cross-summary-box span,
+.cross-summary-box small { color: var(--muted); }
+.cross-summary-box strong { font-size: 24px; }
+.cross-header-list {
+  display: grid;
+  gap: 10px;
+  max-height: 320px;
+  overflow: auto;
+  margin-top: 14px;
+  padding: 4px;
+}
+.cross-header-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border: 1px solid #dbe4ef;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fbfdff 0%, #f3f7fb 100%);
+}
+.cross-header-item input {
+  width: 18px;
+  min-height: 18px;
+  margin: 0;
+}
+.cross-header-item span {
+  min-width: 0;
+  color: #223449;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.cross-merge-actions {
+  justify-content: space-between;
+  gap: 16px;
+}
+.cross-search-results {
+  display: grid;
+  gap: 14px;
+  max-height: 680px;
+  overflow: auto;
+  padding-right: 4px;
+}
+.cross-empty-state {
+  padding: 18px;
+  border: 1px dashed #cbd8e6;
+  border-radius: 16px;
+  background: #f7fafc;
+  color: var(--muted);
+  text-align: center;
+}
+.cross-result-card {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fff;
+  overflow: hidden;
+}
+.cross-result-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  background: #f7fafc;
+}
+.cross-result-meta span {
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+.cross-row-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  padding: 16px;
+}
+.cross-cell {
+  min-height: 60px;
+  padding: 12px 12px 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  text-align: left;
+  transition: border-color .18s ease, box-shadow .18s ease, background .18s ease;
+}
+.cross-cell:hover {
+  border-color: #b8cbe0;
+  box-shadow: 0 8px 18px rgba(22, 32, 51, 0.08);
+}
+.cross-cell.matched {
+  background: #fff8e8;
+  border-color: #efd39a;
+}
+.cross-cell-index {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+.cross-cell-text {
+  display: block;
+  width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.55;
+  color: var(--ink);
 }
 .metrics { display: grid; grid-template-columns: repeat(6, minmax(0,1fr)); gap: 12px; margin-bottom: 14px; }
 .metrics div { padding: 14px; background: #f7fafc; border: 1px solid var(--line); border-radius: 16px; }
@@ -2204,7 +2502,7 @@ button:disabled { opacity: .58; cursor: not-allowed; }
 @media (max-width: 980px) {
   .shell { grid-template-columns: 1fr; }
   .sidebar { position: static; }
-  .hero, .grid.two, .stage-grid, .metrics, .prompt-grid, .dashboard-grid, .scope-list, .compact-metrics, .result-metrics { grid-template-columns: 1fr; }
+  .hero, .grid.two, .stage-grid, .metrics, .prompt-grid, .dashboard-grid, .scope-list, .compact-metrics, .result-metrics, .cross-row-grid { grid-template-columns: 1fr; }
   .sticky-actions { position: static; }
   .content { padding: 18px; }
   .hero-side { justify-items: stretch; }
@@ -2238,6 +2536,28 @@ let availableModels = [];
 let currentProviderName = "DeepSeek";
 let currentBaseUrl = "";
 let lastScanResult = null;
+let crossExcelScanState = null;
+let crossExcelSearchState = null;
+let crossExcelOutputFile = "";
+let currentPageId = "overviewPage";
+const TASK_STATUS_BY_PAGE = {
+  overviewPage: {
+    taskLabel: "文本预处理工具",
+    pill: "空闲",
+    pillClass: "",
+    stageLabel: "未启动",
+    message: "等待开始任务",
+    active: false,
+  },
+  crossExcelPage: {
+    taskLabel: "跨Excel搜索与合并",
+    pill: "空闲",
+    pillClass: "",
+    stageLabel: "未启动",
+    message: "等待开始任务",
+    active: false,
+  },
+};
 const PAGE_TASK_LABELS = {
   overviewPage: "文本预处理工具",
   modelSettingsPage: "模型设置",
@@ -2246,6 +2566,17 @@ const PAGE_TASK_LABELS = {
   promptSettingsPage: "文本预处理工具",
   runDetailsPage: "文本预处理工具",
   resultsPage: "文本预处理工具",
+  crossExcelPage: "跨Excel搜索与合并",
+};
+const PAGE_HERO_COPY = {
+  overviewPage: { title: "文本预处理工具", lede: "用于提取术语、识别非译元素，并整理文本预处理结果。" },
+  modelSettingsPage: { title: "模型设置", lede: "统一管理当前工具使用的模型连接。" },
+  modelStageSettingsPage: { title: "模型阶段设置", lede: "分别控制非译元素、术语召回和术语校验阶段。" },
+  nontransSettingsPage: { title: "非译元素设置", lede: "管理检测规则、内置规则库和保护方式。" },
+  promptSettingsPage: { title: "提示词设置", lede: "按阶段维护默认提示词。" },
+  runDetailsPage: { title: "运行详情", lede: "查看任务过程、统计和日志。" },
+  resultsPage: { title: "结果", lede: "在这里查看导出结果和数量概览。" },
+  crossExcelPage: { title: "跨Excel搜索与合并", lede: "跨文件搜索整行内容，并按表头合并结果。" },
 };
 const PAGE_ACCORDION_KEYS = {
   overviewPage: "text-preprocess",
@@ -2254,9 +2585,11 @@ const PAGE_ACCORDION_KEYS = {
   promptSettingsPage: "text-preprocess",
   runDetailsPage: "text-preprocess",
   resultsPage: "text-preprocess",
+  crossExcelPage: "cross-excel-search",
 };
 
 function setPage(pageId) {
+  currentPageId = pageId;
   document.querySelectorAll(".page-section").forEach((section) => {
     section.classList.toggle("active", section.id === pageId);
   });
@@ -2264,6 +2597,9 @@ function setPage(pageId) {
     button.classList.toggle("active", button.dataset.pageTarget === pageId);
   });
   $("taskTypeLabel").textContent = PAGE_TASK_LABELS[pageId] || "文本预处理工具";
+  const heroCopy = PAGE_HERO_COPY[pageId] || PAGE_HERO_COPY.overviewPage;
+  $("heroTitle").textContent = heroCopy.title;
+  $("heroLede").textContent = heroCopy.lede;
   const activeAccordionKey = PAGE_ACCORDION_KEYS[pageId] || "";
   document.querySelectorAll(".nav-accordion").forEach((accordion) => {
     if (!accordion.dataset.accordionKey) return;
@@ -2272,6 +2608,51 @@ function setPage(pageId) {
   if (pageId === "nontransSettingsPage" && pendingRuleState.show_library_dot) {
     markPendingRuleSeen({ library_seen: true }).catch(() => {});
   }
+  renderCurrentTaskStatus();
+}
+
+function taskStatusForPage(pageId) {
+  if (TASK_STATUS_BY_PAGE[pageId]) {
+    return TASK_STATUS_BY_PAGE[pageId];
+  }
+  if (PAGE_ACCORDION_KEYS[pageId] === "text-preprocess") {
+    return TASK_STATUS_BY_PAGE.overviewPage;
+  }
+  return {
+    taskLabel: PAGE_TASK_LABELS[pageId] || "当前任务",
+    pill: "空闲",
+    pillClass: "",
+    stageLabel: "未启动",
+    message: "等待开始任务",
+    active: false,
+  };
+}
+
+function setTaskStatus(pageId, nextState = {}) {
+  const base = taskStatusForPage(pageId);
+  TASK_STATUS_BY_PAGE[pageId] = {
+    ...base,
+    ...nextState,
+  };
+}
+
+function renderCurrentTaskStatus() {
+  const state = taskStatusForPage(currentPageId);
+  renderTaskStatus(
+    state.taskLabel,
+    state.pill,
+    state.pillClass,
+    state.stageLabel,
+    state.message,
+  );
+}
+
+function renderTaskStatus(taskLabel, pillText, pillClass, stageLabel, message) {
+  $("taskTypeLabel").textContent = taskLabel || "文本预处理工具";
+  $("statusPill").textContent = pillText || "空闲";
+  $("statusPill").className = `pill ${pillClass || ""}`.trim();
+  $("stageLabel").textContent = stageLabel || "未启动";
+  $("statusMessage").textContent = message || "等待开始任务";
 }
 
 function setSubtab(group, targetId) {
@@ -2372,6 +2753,131 @@ function applyScanResult(data) {
 
   $("headerName").disabled = false;
   setHeaderOptions(data?.headers || [], $("headerName").value || (data?.headers || [])[0] || "");
+}
+
+function setCrossExcelHeaderSelection(selected) {
+  document.querySelectorAll('#crossExcelHeaderList input[type="checkbox"]').forEach((checkbox) => {
+    checkbox.checked = Boolean(selected);
+  });
+}
+
+function selectedCrossExcelHeaders() {
+  return Array.from(document.querySelectorAll('#crossExcelHeaderList input[type="checkbox"]:checked'))
+    .map((checkbox) => checkbox.value.trim())
+    .filter(Boolean);
+}
+
+function renderCrossExcelHeaders(headers) {
+  const container = $("crossExcelHeaderList");
+  const values = Array.isArray(headers)
+    ? headers.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  container.innerHTML = "";
+  if (!values.length) {
+    container.innerHTML = '<div class="cross-empty-state">扫描目录后会在这里显示全部表头。</div>';
+    return;
+  }
+  values.forEach((header, index) => {
+    const label = document.createElement("label");
+    label.className = "cross-header-item";
+    label.innerHTML = `
+      <input type="checkbox" value="${escapeHtml(header)}" />
+      <span>${escapeHtml(header)}</span>`;
+    container.appendChild(label);
+  });
+}
+
+function renderCrossExcelScan(data) {
+  crossExcelScanState = data || null;
+  $("crossExcelFileCount").textContent = Number(data?.file_count || 0);
+  $("crossExcelScanHint").textContent = data
+    ? `已发现 ${Number(data.file_count || 0)} 个文件，${Number((data.headers || []).length)} 个表头。`
+    : "请先选择目录并扫描。";
+  renderCrossExcelHeaders(data?.headers || []);
+  renderCrossExcelSearchResults(null);
+  $("crossExcelSearchHint").textContent = "";
+  setCrossExcelOutput("");
+}
+
+function renderCrossExcelSearchResults(data) {
+  crossExcelSearchState = data || null;
+  const items = Array.isArray(data?.items) ? data.items : [];
+  $("crossExcelMatchCount").textContent = items.length;
+  $("crossExcelScannedRows").textContent = Number(data?.scanned_rows || 0);
+  $("crossExcelTruncatedLabel").textContent = !data
+    ? "未搜索"
+    : data.truncated
+      ? "已截断"
+      : "已完成";
+
+  const container = $("crossExcelSearchResults");
+  container.innerHTML = "";
+  if (!data) {
+    container.innerHTML = '<div class="cross-empty-state">执行搜索后，这里会显示命中的行。</div>';
+    return;
+  }
+  if (!items.length) {
+    container.innerHTML = '<div class="cross-empty-state">没有找到匹配内容。</div>';
+    return;
+  }
+
+  items.forEach((item) => {
+    const card = document.createElement("article");
+    card.className = "cross-result-card";
+    const matched = new Set(Array.isArray(item.matched_columns) ? item.matched_columns.map((value) => Number(value)) : []);
+    const cellsHtml = (Array.isArray(item.row_values) ? item.row_values : []).map((value, index) => `
+      <button
+        type="button"
+        class="cross-cell ${matched.has(index) ? "matched" : ""}"
+        data-copy-value="${escapeHtml(String(value || ""))}">
+        <span class="cross-cell-index">第 ${index + 1} 列</span>
+        <span class="cross-cell-text">${escapeHtml(String(value || "")) || "&nbsp;"}</span>
+      </button>`).join("");
+    card.innerHTML = `
+      <div class="cross-result-meta">
+        <span>${escapeHtml(String(item.file_name || ""))}</span>
+        <span>${escapeHtml(String(item.sheet_name || ""))}</span>
+        <span>第 ${Number(item.row_index || 0)} 行</span>
+      </div>
+      <div class="cross-row-grid">${cellsHtml}</div>`;
+    card.querySelectorAll(".cross-cell").forEach((button) => {
+      button.addEventListener("click", async () => {
+        await copyToClipboard(button.dataset.copyValue || "");
+        $("crossExcelSearchHint").textContent = "已复制单元格内容";
+        setTimeout(() => {
+          if ($("crossExcelSearchHint").textContent === "已复制单元格内容") {
+            $("crossExcelSearchHint").textContent = "";
+          }
+        }, 1200);
+      });
+    });
+    container.appendChild(card);
+  });
+}
+
+function setCrossExcelOutput(filePath, message = "") {
+  crossExcelOutputFile = String(filePath || "").trim();
+  $("crossExcelOutputFile").textContent = crossExcelOutputFile || "暂无输出";
+  $("crossExcelOutputHint").textContent = message || (crossExcelOutputFile ? "合并完成，可以打开文件或输出目录。" : "合并结果会保存到工具 output 目录。");
+  $("openCrossExcelOutputButton").disabled = !crossExcelOutputFile;
+  $("openCrossExcelOutputFileButton").disabled = !crossExcelOutputFile;
+}
+
+async function copyToClipboard(text) {
+  const value = String(text || "");
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "readonly");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  document.body.removeChild(textarea);
 }
 
 async function loadSettings() {
@@ -3103,6 +3609,183 @@ async function chooseFolder() {
   }
 }
 
+async function chooseCrossExcelFolder() {
+  try {
+    const data = await api("/api/dialog/select-folder", {
+      method: "POST",
+      body: "{}",
+    });
+    if (data.cancelled || !data.folder_path) {
+      return;
+    }
+    $("crossExcelFolderPath").value = data.folder_path;
+    await scanCrossExcelFolder();
+  } catch (error) {
+    $("crossExcelScanHint").textContent = error.message;
+  }
+}
+
+async function scanCrossExcelFolder() {
+  const folder = $("crossExcelFolderPath").value.trim();
+  if (!folder) {
+    $("crossExcelScanHint").textContent = "请先填写输入目录";
+    return;
+  }
+  setTaskStatus("crossExcelPage", {
+    active: true,
+    taskLabel: "跨Excel搜索与合并",
+    pill: "运行中",
+    pillClass: "running",
+    stageLabel: "扫描目录",
+    message: "正在扫描文件和表头",
+  });
+  renderCurrentTaskStatus();
+  try {
+    const data = await api(`/api/cross-excel/scan?folder_path=${encodeURIComponent(folder)}`);
+    renderCrossExcelScan(data);
+    setTaskStatus("crossExcelPage", {
+      active: false,
+      taskLabel: "跨Excel搜索与合并",
+      pill: "空闲",
+      pillClass: "",
+      stageLabel: "扫描完成",
+      message: `已发现 ${Number(data.file_count || 0)} 个文件，${Number((data.headers || []).length)} 个表头`,
+    });
+    renderCurrentTaskStatus();
+  } catch (error) {
+    crossExcelScanState = null;
+    $("crossExcelFileCount").textContent = "0";
+    $("crossExcelScanHint").textContent = error.message;
+    renderCrossExcelHeaders([]);
+    renderCrossExcelSearchResults(null);
+    setCrossExcelOutput("");
+    setTaskStatus("crossExcelPage", {
+      active: false,
+      taskLabel: "跨Excel搜索与合并",
+      pill: "失败",
+      pillClass: "failed",
+      stageLabel: "扫描失败",
+      message: error.message,
+    });
+    renderCurrentTaskStatus();
+  }
+}
+
+async function searchCrossExcel() {
+  const folder = $("crossExcelFolderPath").value.trim();
+  const query = $("crossExcelQuery").value.trim();
+  if (!folder) {
+    $("crossExcelSearchHint").textContent = "请先选择目录";
+    return;
+  }
+  if (!query) {
+    $("crossExcelSearchHint").textContent = "请输入要搜索的内容";
+    return;
+  }
+  $("crossExcelSearchHint").textContent = "搜索中...";
+  setTaskStatus("crossExcelPage", {
+    active: true,
+    taskLabel: "跨Excel搜索与合并",
+    pill: "运行中",
+    pillClass: "running",
+    stageLabel: "全局搜索",
+    message: `正在搜索：${query}`,
+  });
+  renderCurrentTaskStatus();
+  try {
+    const data = await api("/api/cross-excel/search", {
+      method: "POST",
+      body: JSON.stringify({
+        folder_path: folder,
+        query,
+        limit: Number($("crossExcelLimit").value || 300),
+      }),
+    });
+    renderCrossExcelSearchResults(data);
+    $("crossExcelSearchHint").textContent = data.truncated ? "结果过多，已按上限截断显示" : "搜索完成";
+    setTaskStatus("crossExcelPage", {
+      active: false,
+      taskLabel: "跨Excel搜索与合并",
+      pill: "空闲",
+      pillClass: "",
+      stageLabel: "搜索完成",
+      message: data.truncated
+        ? `已命中 ${Number((data.items || []).length)} 条，结果已截断`
+        : `已命中 ${Number((data.items || []).length)} 条`,
+    });
+    renderCurrentTaskStatus();
+  } catch (error) {
+    renderCrossExcelSearchResults(null);
+    $("crossExcelSearchHint").textContent = error.message;
+    setTaskStatus("crossExcelPage", {
+      active: false,
+      taskLabel: "跨Excel搜索与合并",
+      pill: "失败",
+      pillClass: "failed",
+      stageLabel: "搜索失败",
+      message: error.message,
+    });
+    renderCurrentTaskStatus();
+  }
+}
+
+async function mergeCrossExcel() {
+  const folder = $("crossExcelFolderPath").value.trim();
+  if (!folder) {
+    $("crossExcelOutputHint").textContent = "请先选择目录";
+    return;
+  }
+  const headers = selectedCrossExcelHeaders();
+  if (!headers.length) {
+    $("crossExcelOutputHint").textContent = "请至少勾选一个表头";
+    return;
+  }
+  $("crossExcelOutputHint").textContent = "合并中...";
+  setTaskStatus("crossExcelPage", {
+    active: true,
+    taskLabel: "跨Excel搜索与合并",
+    pill: "运行中",
+    pillClass: "running",
+    stageLabel: "按表头合并",
+    message: `正在合并 ${headers.length} 个表头`,
+  });
+  renderCurrentTaskStatus();
+  try {
+    const data = await api("/api/cross-excel/merge", {
+      method: "POST",
+      body: JSON.stringify({
+        folder_path: folder,
+        headers,
+        apply_format: $("crossExcelApplyFormat").checked,
+      }),
+    });
+    setCrossExcelOutput(
+      data.output_file || "",
+      `合并完成，共输出 ${Number(data.row_count || 0)} 行，${Number(data.column_count || 0)} 列。`,
+    );
+    setTaskStatus("crossExcelPage", {
+      active: false,
+      taskLabel: "跨Excel搜索与合并",
+      pill: "空闲",
+      pillClass: "",
+      stageLabel: "合并完成",
+      message: `已输出 ${Number(data.row_count || 0)} 行到结果文件`,
+    });
+    renderCurrentTaskStatus();
+  } catch (error) {
+    setCrossExcelOutput("", error.message);
+    setTaskStatus("crossExcelPage", {
+      active: false,
+      taskLabel: "跨Excel搜索与合并",
+      pill: "失败",
+      pillClass: "failed",
+      stageLabel: "合并失败",
+      message: error.message,
+    });
+    renderCurrentTaskStatus();
+  }
+}
+
 async function startTask() {
   const payload = {
     folder_path: $("folderPath").value.trim(),
@@ -3180,11 +3863,15 @@ function formatProgressPercent(current, total, isRunning) {
 
 async function refreshStatus() {
   const data = await api("/api/status");
-  $("statusPill").textContent = data.is_running ? "运行中" : data.last_error ? "失败" : "空闲";
-  $("statusPill").className = `pill ${data.is_running ? "running" : data.last_error ? "failed" : ""}`;
-  $("stageLabel").textContent = data.stage_label || data.stage || "空闲";
-  $("heroStateText").textContent = data.is_running ? "运行中" : data.last_error ? "执行失败" : "未启动";
-  $("statusMessage").textContent = data.message || (data.is_running ? "任务运行中" : "等待开始任务");
+  setTaskStatus("overviewPage", {
+    active: Boolean(data.is_running),
+    taskLabel: "文本预处理工具",
+    pill: data.is_running ? "运行中" : data.last_error ? "失败" : "空闲",
+    pillClass: data.is_running ? "running" : data.last_error ? "failed" : "",
+    stageLabel: data.stage_label || data.stage || "未启动",
+    message: data.message || (data.is_running ? "任务运行中" : "等待开始任务"),
+  });
+  renderCurrentTaskStatus();
   $("progressText").textContent = formatProgressPercent(data.progress_current, data.progress_total, data.is_running);
   $("batchText").textContent = `${data.current_batch || 0} / ${data.total_batches || 0}`;
   $("successText").textContent = data.success_count || 0;
@@ -3249,11 +3936,37 @@ $("pendingRuleSelectAllButton").addEventListener("click", () => setAllPendingRul
 $("pendingRuleClearSelectionButton").addEventListener("click", () => setAllPendingRuleSelection(false));
 $("confirmPendingRuleImportButton").addEventListener("click", importPendingRules);
 $("chooseFolderButton").addEventListener("click", chooseFolder);
+$("chooseCrossExcelFolderButton").addEventListener("click", chooseCrossExcelFolder);
 $("scanButton").addEventListener("click", scanFolder);
+$("scanCrossExcelButton").addEventListener("click", scanCrossExcelFolder);
+$("searchCrossExcelButton").addEventListener("click", searchCrossExcel);
+$("mergeCrossExcelButton").addEventListener("click", mergeCrossExcel);
+$("selectAllCrossHeadersButton").addEventListener("click", () => setCrossExcelHeaderSelection(true));
+$("clearCrossHeadersButton").addEventListener("click", () => setCrossExcelHeaderSelection(false));
 $("startButton").addEventListener("click", startTask);
 $("resumeButton").addEventListener("click", resumeTask);
 $("stopButton").addEventListener("click", stopTask);
 $("clearCacheButton").addEventListener("click", clearRuntimeCache);
+$("crossExcelQuery").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    searchCrossExcel();
+  }
+});
+$("openCrossExcelOutputButton").addEventListener("click", async () => {
+  if (!crossExcelOutputFile) return;
+  await api(`/api/results/open-folder?output_file=${encodeURIComponent(crossExcelOutputFile)}`, {
+    method: "POST",
+    body: "{}",
+  });
+});
+$("openCrossExcelOutputFileButton").addEventListener("click", async () => {
+  if (!crossExcelOutputFile) return;
+  await api(`/api/results/open-file?output_file=${encodeURIComponent(crossExcelOutputFile)}`, {
+    method: "POST",
+    body: "{}",
+  });
+});
 $("downloadResultButton").addEventListener("click", () => {
   if (!latestResultFile) return;
   window.location.href = `/api/results/download?output_file=${encodeURIComponent(latestResultFile)}`;
@@ -3274,6 +3987,10 @@ document.querySelectorAll(".subnav-link").forEach((button) => {
   button.addEventListener("click", () => setSubtab(button.dataset.subtabGroup, button.dataset.subtabTarget));
 });
 
+renderCrossExcelHeaders([]);
+renderCrossExcelSearchResults(null);
+setCrossExcelOutput("");
+renderCurrentTaskStatus();
 Promise.all([loadSettings(), loadAsciiPatterns(), loadPromptTemplates(), loadBuiltinRules(), loadPendingRules(), loadAppUpdateInfo()]).then(refreshStatus).catch((error) => {
   $("statusMessage").textContent = error.message;
 });

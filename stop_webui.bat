@@ -9,5 +9,4 @@ for /f "tokens=5" %%p in ('netstat -ano ^| findstr /r /c:":8765 .*LISTENING"') d
 )
 
 echo Done.
-echo Press any key to close this window...
-pause >nul
+exit /b 0

@@ -1,7 +1,7 @@
 """Application constants and default prompts for the WebUI pipeline."""
 
 APP_NAME = "AI术语提取工具"
-APP_VERSION = "2.0.3"
+APP_VERSION = "2.0.4"
 CONFIG_VERSION = 6
 RUNTIME_CACHE_VERSION = 3
 UPDATE_REPOSITORY_OWNER = "willwong0908"
