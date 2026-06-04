@@ -12,9 +12,9 @@
       "enabled": true,
       "order_index": 1,
       "examples": [
-        "<font=\"ari-w9500-bold SDF\">",
-        "<b>",
-        "<size=150%>"
+        "<size=150%>",
+        "<div>",
+        "<bad_tag>"
       ],
       "source": "builtin",
       "conflict_notes": ""
@@ -30,9 +30,9 @@
       "enabled": true,
       "order_index": 2,
       "examples": [
-        "<title_badge id=\"king_2026\" />",
-        "<speed_boost multiplier=\"1.5\" />",
-        "<timer counts=10 />"
+        "<player_name color=\"#FF0000\" />",
+        "<status_icon type='poison' duration=5 />",
+        "<buff_add val=\"+15%\" />"
       ],
       "source": "builtin",
       "conflict_notes": ""
@@ -48,9 +48,9 @@
       "enabled": true,
       "order_index": 3,
       "examples": [
-        "</c>",
         "</b>",
-        "</size>"
+        "</size>",
+        "</div>"
       ],
       "source": "builtin",
       "conflict_notes": ""
@@ -84,9 +84,9 @@
       "enabled": true,
       "order_index": 5,
       "examples": [
-        "{boostedweaponname}",
-        "{boostedamount}",
-        "{perstackbonus}"
+        "{net_ping}",
+        "{guild.name}",
+        "{guild.id}"
       ],
       "source": "builtin",
       "conflict_notes": ""
@@ -119,9 +119,9 @@
       "enabled": true,
       "order_index": 7,
       "examples": [
-        "${debtTomorrow}",
         "${interestAmount}",
-        "${value}"
+        "${value}",
+        "${net_ping}"
       ],
       "source": "builtin",
       "conflict_notes": ""
@@ -189,6 +189,24 @@
       "examples": [
         "&nbsp;",
         "&#160;"
+      ],
+      "source": "builtin",
+      "conflict_notes": ""
+    },
+    {
+      "rule_id": "ai_1_filter_warning",
+      "name": "brace_warning_family",
+      "pattern": "\\{[A-Za-z_][A-Za-z0-9_]*\\|Warning\\}",
+      "element_type": "brace",
+      "open_pattern": "",
+      "close_pattern": "",
+      "empty_pattern": "\\{[A-Za-z_][A-Za-z0-9_]*\\|Warning\\}",
+      "enabled": true,
+      "order_index": 12,
+      "examples": [
+        "{filter|Warning}",
+        "{base|Warning}",
+        "{chargesleft|Warning}"
       ],
       "source": "builtin",
       "conflict_notes": ""

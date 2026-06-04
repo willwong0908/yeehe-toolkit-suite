@@ -1156,14 +1156,39 @@ INDEX_HTML = """<!doctype html>
         </div>
       </div>
       <nav class="sidebar-nav">
-        <button class="nav-link active" data-page-target="overviewPage">总览</button>
-        <button class="nav-link" data-page-target="modelSettingsPage">模型设置</button>
-        <button class="nav-link" data-page-target="nontransSettingsPage">非译元素设置</button>
-        <button class="nav-link" data-page-target="promptSettingsPage">提示词设置</button>
-        <button class="nav-link" data-page-target="runDetailsPage">运行详情</button>
-        <button class="nav-link" data-page-target="resultsPage">结果</button>
+        <div class="nav-group">
+          <div class="nav-submenu">
+            <button class="nav-link nav-link-sub" data-page-target="modelSettingsPage">模型设置</button>
+          </div>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">文本预处理工具</div>
+          <div class="nav-submenu">
+            <button class="nav-link nav-link-sub active" data-page-target="overviewPage">总览</button>
+            <button class="nav-link nav-link-sub" data-page-target="modelStageSettingsPage">模型阶段设置</button>
+            <button class="nav-link nav-link-sub" data-page-target="nontransSettingsPage">非译元素设置</button>
+            <button class="nav-link nav-link-sub" data-page-target="promptSettingsPage">提示词设置</button>
+            <button class="nav-link nav-link-sub" data-page-target="runDetailsPage">运行详情</button>
+            <button class="nav-link nav-link-sub" data-page-target="resultsPage">结果</button>
+          </div>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">Diff 工具</div>
+          <div class="nav-submenu">
+            <button class="nav-link nav-link-sub nav-link-placeholder" type="button" disabled>功能预留</button>
+          </div>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">AI 审校工具</div>
+          <div class="nav-submenu">
+            <button class="nav-link nav-link-sub nav-link-placeholder" type="button" disabled>功能预留</button>
+          </div>
+        </div>
       </nav>
       <div class="sidebar-status">
+        <small class="status-caption">当前任务</small>
+        <strong id="taskTypeLabel">文本预处理工具</strong>
+        <small class="status-caption">任务状态</small>
         <span id="statusPill" class="pill">空闲</span>
         <strong id="stageLabel">未启动</strong>
         <small id="statusMessage">等待开始任务</small>
@@ -1287,59 +1312,58 @@ INDEX_HTML = """<!doctype html>
             <p></p>
           </div>
         </div>
-        <div class="subnav">
-          <button class="subnav-link active" data-subtab-group="model" data-subtab-target="modelConnectionPanel">通用模型</button>
-          <button class="subnav-link" data-subtab-group="model" data-subtab-target="modelBehaviorPanel">阶段行为</button>
-        </div>
+        <section class="card">
+          <div class="card-title">
+            <h3>通用模型</h3>
+            <p>统一设置当前任务使用的模型连接。</p>
+          </div>
+          <div class="grid two">
+            <label>供应商<input value="DeepSeek" readonly /></label>
+            <label>模型列表<select id="modelName"></select></label>
+            <label>API Key<span class="secret-field"><input id="apiKey" type="password" autocomplete="off" placeholder="sk-..." /><button id="saveModelConnectionButton" class="mini-button" type="button">加载模型</button></span></label>
+            <label>超时秒数<input id="timeoutSeconds" type="number" min="1" value="90" /></label>
+            <label>最大并发<input id="maxConcurrency" type="number" min="1" value="6" /></label>
+            <label class="check"><input id="disableSystemProxy" type="checkbox" checked /> 禁用系统代理</label>
+          </div>
+          <div class="actions">
+            <span id="modelConnectionHint" class="hint"></span>
+          </div>
+        </section>
+      </section>
 
-        <div id="modelConnectionPanel" class="subtab-panel active" data-subtab-panel-group="model">
-          <section class="card">
+      <section id="modelStageSettingsPage" class="page-section">
+        <div class="section-header">
+          <div>
+            <h2>模型阶段设置</h2>
+            <p>分别控制非译元素、术语召回和术语校验阶段。</p>
+          </div>
+        </div>
+        <div class="stage-grid">
+          <section class="card compact-card">
             <div class="card-title">
-              <h3>通用模型</h3>
+              <h3>非译元素阶段</h3>
               <p></p>
             </div>
-            <div class="grid two">
-              <label>供应商<input value="DeepSeek" readonly /></label>
-              <label>模型列表<select id="modelName"></select></label>
-              <label>API Key<span class="secret-field"><input id="apiKey" type="password" autocomplete="off" placeholder="sk-..." /><button id="saveModelConnectionButton" class="mini-button" type="button">加载模型</button></span></label>
-              <label>超时秒数<input id="timeoutSeconds" type="number" min="1" value="90" /></label>
-              <label>最大并发<input id="maxConcurrency" type="number" min="1" value="6" /></label>
-              <label class="check"><input id="disableSystemProxy" type="checkbox" checked /> 禁用系统代理</label>
-            </div>
-            <div class="actions">
-              <span id="modelConnectionHint" class="hint"></span>
-            </div>
+            <label>单次处理长度<input id="nontransLimit" type="number" min="200" value="3000" /></label>
+            <label class="check"><input id="nontransThinking" type="checkbox" /> 深度思考</label>
           </section>
-        </div>
-
-        <div id="modelBehaviorPanel" class="subtab-panel" data-subtab-panel-group="model">
-          <div class="stage-grid">
-            <section class="card compact-card">
-              <div class="card-title">
-                <h3>非译元素阶段</h3>
-                <p></p>
-              </div>
-              <label>单次处理长度<input id="nontransLimit" type="number" min="200" value="3000" /></label>
-              <label class="check"><input id="nontransThinking" type="checkbox" /> 深度思考</label>
-            </section>
-            <section class="card compact-card">
-              <div class="card-title">
-                <h3>术语召回阶段</h3>
-                <p></p>
-              </div>
-              <label>单次处理长度<input id="recallLimit" type="number" min="200" value="3000" /></label>
-              <label class="check"><input id="recallThinking" type="checkbox" /> 深度思考</label>
-            </section>
-            <section class="card compact-card">
-              <div class="card-title">
-                <h3>术语校验阶段</h3>
-                <p></p>
-              </div>
-              <label>单次处理长度<input id="reviewLimit" type="number" min="200" value="3000" /></label>
-              <label>上下文长度<input id="reviewContextLimit" type="number" min="50" max="2000" value="220" /></label>
-              <label class="check"><input id="reviewThinking" type="checkbox" /> 深度思考</label>
-            </section>
-          </div>
+          <section class="card compact-card">
+            <div class="card-title">
+              <h3>术语召回阶段</h3>
+              <p></p>
+            </div>
+            <label>单次处理长度<input id="recallLimit" type="number" min="200" value="3000" /></label>
+            <label class="check"><input id="recallThinking" type="checkbox" /> 深度思考</label>
+          </section>
+          <section class="card compact-card">
+            <div class="card-title">
+              <h3>术语校验阶段</h3>
+              <p></p>
+            </div>
+            <label>单次处理长度<input id="reviewLimit" type="number" min="200" value="3000" /></label>
+            <label>上下文长度<input id="reviewContextLimit" type="number" min="50" max="2000" value="220" /></label>
+            <label class="check"><input id="reviewThinking" type="checkbox" /> 深度思考</label>
+          </section>
         </div>
 
         <div class="sticky-actions">
@@ -1658,7 +1682,16 @@ body {
 }
 .brand strong { display:block; font-size: 18px; line-height: 1.2; }
 .brand small { color: var(--muted); line-height: 1.3; }
-.sidebar-nav { display: grid; gap: 8px; margin-bottom: 22px; }
+.sidebar-nav { display: grid; gap: 18px; margin-bottom: 22px; }
+.nav-group { display: grid; gap: 8px; }
+.nav-group-title {
+  padding: 0 6px;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+.nav-submenu { display: grid; gap: 8px; }
 .nav-link {
   width: 100%;
   justify-content: flex-start;
@@ -1671,6 +1704,12 @@ body {
   border-radius: 12px;
   font-weight: 700;
 }
+.nav-link-sub { padding-left: 18px; font-size: 15px; }
+.nav-link-placeholder {
+  opacity: 0.58;
+  border: 1px dashed #cbd8e6;
+  background: rgba(237,243,248,.45);
+}
 .nav-link.active, .nav-link:hover { background: #e7f1ef; color: var(--primary-strong); }
 .sidebar-status {
   display: grid;
@@ -1679,6 +1718,13 @@ body {
   background: rgba(255,255,255,.78);
   border: 1px solid var(--line);
   border-radius: 18px;
+}
+.status-caption {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 .service-tip { color: var(--muted); line-height: 1.5; }
 .service-tip code { font-family: "Cascadia Mono", "Consolas", monospace; font-size: 12px; }
@@ -2122,6 +2168,15 @@ let availableModels = [];
 let currentProviderName = "DeepSeek";
 let currentBaseUrl = "";
 let lastScanResult = null;
+const PAGE_TASK_LABELS = {
+  overviewPage: "文本预处理工具",
+  modelSettingsPage: "模型设置",
+  modelStageSettingsPage: "文本预处理工具",
+  nontransSettingsPage: "文本预处理工具",
+  promptSettingsPage: "文本预处理工具",
+  runDetailsPage: "文本预处理工具",
+  resultsPage: "文本预处理工具",
+};
 
 function setPage(pageId) {
   document.querySelectorAll(".page-section").forEach((section) => {
@@ -2130,6 +2185,7 @@ function setPage(pageId) {
   document.querySelectorAll(".nav-link").forEach((button) => {
     button.classList.toggle("active", button.dataset.pageTarget === pageId);
   });
+  $("taskTypeLabel").textContent = PAGE_TASK_LABELS[pageId] || "文本预处理工具";
   if (pageId === "nontransSettingsPage" && pendingRuleState.show_library_dot) {
     markPendingRuleSeen({ library_seen: true }).catch(() => {});
   }

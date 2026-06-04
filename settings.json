@@ -3,7 +3,7 @@
   "input_defaults": {
     "folder_path": "",
     "header_name": "",
-    "source_language": "en",
+    "source_language": "cn",
     "export_review_sheet": false,
     "ascii_filter_blacklist": [
       "playername",
@@ -136,25 +136,8 @@
   "ui_preferences": {
     "window_width": 1360,
     "window_height": 920,
-    "pending_nontrans_rule_imports": [
-      {
-        "cache_id": "pending_rule_0001",
-        "rule_id": "ai_1_filter_warning",
-        "name": "brace_warning_family",
-        "role": "empty",
-        "regex": "\\{[A-Za-z_][A-Za-z0-9_]*\\|Warning\\}",
-        "element_type": "brace",
-        "enabled": true,
-        "examples": [
-          "{filter|Warning}",
-          "{base|Warning}",
-          "{chargesleft|Warning}"
-        ],
-        "created_at": "2026-06-02T18:18:42",
-        "updated_at": "2026-06-02T18:18:42"
-      }
-    ],
-    "pending_nontrans_rule_notice_seen": false,
-    "pending_nontrans_rule_library_seen": false
+    "pending_nontrans_rule_imports": [],
+    "pending_nontrans_rule_notice_seen": true,
+    "pending_nontrans_rule_library_seen": true
   }
 }
