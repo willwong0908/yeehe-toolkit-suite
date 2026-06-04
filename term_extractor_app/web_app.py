@@ -7,16 +7,19 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import webbrowser
 from pathlib import Path
 from typing import Optional
 
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, ConfigDict
 
 if __package__:
+    from .constants import APP_VERSION, UPDATE_ASSET_NAME_HINTS, UPDATE_RELEASE_API
     from .core import scan_folder
     from .models import TaskInput, normalize_extraction_mode, sync_extraction_flags
     from .nontrans import (
@@ -34,6 +37,7 @@ if __package__:
         append_pending_nontrans_rule_imports,
         build_default_settings,
         clear_pending_nontrans_rule_imports,
+        get_app_root,
         load_pending_nontrans_rule_imports,
         mark_pending_nontrans_rule_notice,
     )
@@ -41,6 +45,7 @@ else:
     package_root = Path(__file__).resolve().parent.parent
     if str(package_root) not in sys.path:
         sys.path.insert(0, str(package_root))
+    from term_extractor_app.constants import APP_VERSION, UPDATE_ASSET_NAME_HINTS, UPDATE_RELEASE_API
     from term_extractor_app.core import scan_folder
     from term_extractor_app.models import TaskInput, normalize_extraction_mode, sync_extraction_flags
     from term_extractor_app.nontrans import (
@@ -58,6 +63,7 @@ else:
         append_pending_nontrans_rule_imports,
         build_default_settings,
         clear_pending_nontrans_rule_imports,
+        get_app_root,
         load_pending_nontrans_rule_imports,
         mark_pending_nontrans_rule_notice,
     )
@@ -155,6 +161,10 @@ class PromptTemplatesPayload(BaseModel):
 
 class PromptTemplateResetPayload(BaseModel):
     keys: list[str] = []
+
+
+class AppUpdateStartPayload(BaseModel):
+    force: bool = False
 
 
 PROMPT_TEMPLATE_META = [
@@ -283,6 +293,285 @@ def pending_nontrans_rules_response(settings) -> dict:
     }
 
 
+def _normalize_version_parts(version_text: str) -> list[int]:
+    normalized = str(version_text or "").strip().lower()
+    if normalized.startswith("v"):
+        normalized = normalized[1:]
+    parts = []
+    for chunk in normalized.split("."):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        digits = "".join(char for char in chunk if char.isdigit())
+        parts.append(int(digits or 0))
+    return parts
+
+
+def _is_remote_version_newer(current_version: str, remote_version: str) -> bool:
+    left = _normalize_version_parts(current_version)
+    right = _normalize_version_parts(remote_version)
+    length = max(len(left), len(right), 1)
+    left.extend([0] * (length - len(left)))
+    right.extend([0] * (length - len(right)))
+    return tuple(right) > tuple(left)
+
+
+def _pick_update_asset(release_data: dict) -> Optional[dict]:
+    assets = list(release_data.get("assets", []) or [])
+    zip_assets = [
+        item for item in assets
+        if str(item.get("name", "") or "").lower().endswith(".zip")
+        and str(item.get("browser_download_url", "") or "").strip()
+    ]
+    if not zip_assets:
+        return None
+    for hint in UPDATE_ASSET_NAME_HINTS:
+        matched = next(
+            (
+                item for item in zip_assets
+                if hint in str(item.get("name", "") or "").lower()
+            ),
+            None,
+        )
+        if matched is not None:
+            return matched
+    return zip_assets[0]
+
+
+def _resolve_logo_path() -> Path:
+    candidate_paths = [
+        get_app_root() / "logo.png",
+        get_app_root() / "_internal" / "logo.png",
+        get_app_root().parent / "logo.png",
+        Path(__file__).resolve().parent.parent / "logo.png",
+    ]
+    for path in candidate_paths:
+        if path.exists() and path.is_file():
+            return path
+    raise FileNotFoundError("未找到 logo.png")
+
+
+async def fetch_app_update_info() -> dict:
+    current_version = APP_VERSION
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            response = await client.get(
+                UPDATE_RELEASE_API,
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "User-Agent": "TextForge-Toolkit-Updater",
+                },
+            )
+            response.raise_for_status()
+            release_data = response.json()
+    except httpx.HTTPStatusError as exc:
+        if exc.response is not None and exc.response.status_code == 404:
+            return {
+                "supported": bool(getattr(sys, "frozen", False)),
+                "current_version": current_version,
+                "latest_version": current_version,
+                "update_available": False,
+                "release_notes": "",
+                "published_at": "",
+                "download_url": "",
+                "asset_name": "",
+                "message": "当前还没有可用的发布版本。",
+            }
+        return {
+            "supported": bool(getattr(sys, "frozen", False)),
+            "current_version": current_version,
+            "latest_version": current_version,
+            "update_available": False,
+            "release_notes": "",
+            "published_at": "",
+            "download_url": "",
+            "asset_name": "",
+            "message": "检查更新失败：{0}".format(exc),
+        }
+    except Exception as exc:
+        return {
+            "supported": bool(getattr(sys, "frozen", False)),
+            "current_version": current_version,
+            "latest_version": current_version,
+            "update_available": False,
+            "release_notes": "",
+            "published_at": "",
+            "download_url": "",
+            "asset_name": "",
+            "message": "检查更新失败：{0}".format(exc),
+        }
+
+    latest_version = str(
+        release_data.get("tag_name")
+        or release_data.get("name")
+        or current_version
+    ).strip() or current_version
+    asset = _pick_update_asset(release_data) or {}
+    return {
+        "supported": bool(getattr(sys, "frozen", False)),
+        "current_version": current_version,
+        "latest_version": latest_version,
+        "update_available": _is_remote_version_newer(current_version, latest_version),
+        "release_notes": str(release_data.get("body", "") or "").strip(),
+        "published_at": str(release_data.get("published_at", "") or "").strip(),
+        "download_url": str(asset.get("browser_download_url", "") or "").strip(),
+        "asset_name": str(asset.get("name", "") or "").strip(),
+        "message": "",
+    }
+
+
+def _build_update_powershell_script() -> str:
+    return r"""
+param(
+  [string]$DownloadUrl,
+  [string]$BundleRoot,
+  [string]$LauncherName,
+  [string]$ExeName,
+  [int]$ParentPid
+)
+
+$ErrorActionPreference = "Stop"
+
+function Write-Step {
+  param([string]$Message)
+  Write-Host ("[{0}] {1}" -f (Get-Date -Format "HH:mm:ss"), $Message) -ForegroundColor Cyan
+}
+
+function Find-BundlePayloadRoot {
+  param([string]$ExtractRoot, [string]$ExeName, [string]$LauncherName)
+  $roots = @($ExtractRoot)
+  $dirs = Get-ChildItem -LiteralPath $ExtractRoot -Directory -Recurse -ErrorAction SilentlyContinue
+  foreach ($dir in $dirs) {
+    $roots += $dir.FullName
+  }
+  foreach ($root in $roots) {
+    $launcherPath = Join-Path $root $LauncherName
+    $programExe = Join-Path (Join-Path $root "program") $ExeName
+    $directExe = Join-Path $root $ExeName
+    if ((Test-Path -LiteralPath $launcherPath) -and (Test-Path -LiteralPath $programExe)) {
+      return $root
+    }
+    if (Test-Path -LiteralPath $launcherPath) {
+      return $root
+    }
+    if (Test-Path -LiteralPath $programExe) {
+      return $root
+    }
+    if (Test-Path -LiteralPath $directExe) {
+      return $root
+    }
+  }
+  throw "未找到更新包中的启动文件。"
+}
+
+$workDir = Join-Path ([System.IO.Path]::GetTempPath()) ("textforge_update_" + [guid]::NewGuid().ToString("N"))
+$zipPath = Join-Path $workDir "update.zip"
+$extractDir = Join-Path $workDir "extract"
+New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
+
+try {
+  $host.UI.RawUI.WindowTitle = "文本预处理工具 更新中"
+  Write-Host "==============================================" -ForegroundColor DarkGray
+  Write-Host "文本预处理工具 正在更新" -ForegroundColor Yellow
+  Write-Host "请不要关闭此窗口，更新完成后会自动重新打开程序。" -ForegroundColor Gray
+  Write-Host "==============================================" -ForegroundColor DarkGray
+  Write-Host ""
+  Write-Step "开始下载更新包"
+  Invoke-WebRequest -Uri $DownloadUrl -OutFile $zipPath -UseBasicParsing
+  Write-Step "下载完成，正在解压"
+  Expand-Archive -LiteralPath $zipPath -DestinationPath $extractDir -Force
+  $payloadRoot = Find-BundlePayloadRoot -ExtractRoot $extractDir -ExeName $ExeName -LauncherName $LauncherName
+
+  if ($ParentPid -gt 0) {
+    Write-Step "正在关闭旧进程"
+    try {
+      Stop-Process -Id $ParentPid -Force -ErrorAction SilentlyContinue
+    }
+    catch {}
+    for ($i = 0; $i -lt 120; $i++) {
+      $proc = Get-Process -Id $ParentPid -ErrorAction SilentlyContinue
+      if ($null -eq $proc) { break }
+      Start-Sleep -Milliseconds 500
+    }
+  }
+
+  Write-Step "正在替换程序文件"
+  $programDir = Join-Path $BundleRoot "program"
+  if (Test-Path -LiteralPath $programDir) {
+    Remove-Item -LiteralPath $programDir -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  Get-ChildItem -LiteralPath $payloadRoot -Force | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination $BundleRoot -Recurse -Force
+  }
+
+  $launcherPath = Join-Path $BundleRoot $LauncherName
+  Write-Step "更新完成，正在重新启动"
+  if (Test-Path -LiteralPath $launcherPath) {
+    Start-Process -FilePath "cmd.exe" -ArgumentList "/c", ('"{0}"' -f $launcherPath) -WorkingDirectory $BundleRoot | Out-Null
+  }
+  else {
+    Start-Process -FilePath (Join-Path $BundleRoot "program\$ExeName") -WorkingDirectory (Join-Path $BundleRoot "program") | Out-Null
+  }
+  Write-Host ""
+  Write-Host "更新完成，程序已重新启动。" -ForegroundColor Green
+  Start-Sleep -Seconds 2
+}
+finally {
+  Start-Sleep -Seconds 2
+  Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
+}
+"""
+
+
+def start_app_update(download_url: str) -> dict:
+    if not getattr(sys, "frozen", False):
+        raise RuntimeError("当前是源码运行模式，自动更新只支持发布版。")
+    url = str(download_url or "").strip()
+    if not url:
+        raise RuntimeError("没有可用的更新下载地址。")
+
+    app_root = Path(get_app_root()).resolve()
+    exe_path = Path(sys.executable).resolve()
+    bundle_root = app_root.parent if exe_path.parent.name.lower() == "program" else app_root
+    launcher_name = "start_webui.bat"
+    script_dir = Path(tempfile.mkdtemp(prefix="textforge_update_"))
+    script_path = script_dir / "run_update.ps1"
+    # Windows PowerShell 5.x reads UTF-8 scripts reliably when BOM is present.
+    # Without BOM, non-ASCII text in the updater script can be misparsed.
+    script_path.write_text(_build_update_powershell_script(), encoding="utf-8-sig")
+
+    subprocess.Popen(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script_path),
+            "-DownloadUrl",
+            url,
+            "-BundleRoot",
+            str(bundle_root),
+            "-LauncherName",
+            launcher_name,
+            "-ExeName",
+            exe_path.name,
+            "-ParentPid",
+            str(os.getpid()),
+        ],
+        cwd=str(bundle_root),
+        creationflags=(
+            getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        ),
+    )
+    return {
+        "ok": True,
+        "message": "更新已开始，当前页面会关闭，并弹出更新窗口显示进度。",
+    }
+
+
 def _save_builtin_nontrans_rules_to_library(rules_payload: list[BuiltinNonTransRulePayload]) -> dict:
     normalized_rules = []
     seen_rule_ids = set()
@@ -347,7 +636,7 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
-        return INDEX_HTML
+        return build_index_html()
 
     @app.get("/assets/app.css")
     async def css() -> Response:
@@ -359,10 +648,32 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
 
     @app.get("/assets/logo.png")
     async def logo() -> FileResponse:
-        logo_path = Path(__file__).resolve().parent.parent / "logo.png"
-        if not logo_path.exists():
-            raise HTTPException(status_code=404, detail="Logo not found.")
+        try:
+            logo_path = _resolve_logo_path()
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         return FileResponse(logo_path, media_type="image/png")
+
+    @app.get("/api/app-update")
+    async def get_app_update():
+        return await fetch_app_update_info()
+
+    @app.post("/api/app-update/start")
+    async def start_app_update_endpoint(payload: AppUpdateStartPayload):
+        snapshot = task_facade.snapshot()
+        if snapshot.is_running and not payload.force:
+            raise HTTPException(status_code=409, detail="任务运行中，暂时不能更新。")
+        update_info = await fetch_app_update_info()
+        if not update_info.get("supported"):
+            raise HTTPException(status_code=400, detail="当前运行方式不支持自动更新。")
+        if not update_info.get("update_available"):
+            raise HTTPException(status_code=400, detail="当前已经是最新版本。")
+        if not str(update_info.get("download_url", "") or "").strip():
+            raise HTTPException(status_code=400, detail="当前版本缺少可下载的更新包。")
+        try:
+            return start_app_update(str(update_info.get("download_url", "") or ""))
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     @app.get("/api/settings")
     async def get_settings():
@@ -838,7 +1149,8 @@ INDEX_HTML = """<!doctype html>
     <aside class="sidebar">
       <div class="brand">
         <img class="brand-mark" src="/assets/logo.png" alt="文本预处理工具" />
-        <div>
+        <div class="brand-copy">
+          <span class="brand-version">v__APP_VERSION__</span>
           <strong>文本预处理工具</strong>
           <small>术语与非译元素</small>
         </div>
@@ -867,6 +1179,10 @@ INDEX_HTML = """<!doctype html>
           <p class="lede">先选择目录，再开始提取。</p>
         </div>
         <div class="hero-side">
+          <button id="updateNoticeButton" class="notice-button update-notice-button" type="button" hidden>
+            <span class="notice-dot"></span>
+            <span>发现新版本</span>
+          </button>
           <button id="pendingRuleNoticeButton" class="notice-button" type="button" hidden>
             <span class="notice-dot"></span>
             <span>发现新的非译规则</span>
@@ -1262,10 +1578,39 @@ INDEX_HTML = """<!doctype html>
       </div>
     </div>
   </div>
+  <div id="appUpdateOverlay" class="modal-overlay" hidden>
+    <div class="modal-card notice-modal update-modal">
+      <div class="modal-header">
+        <div>
+          <h3>发现新版本</h3>
+          <p id="appUpdateSummary">当前版本与最新版本不一致。</p>
+        </div>
+        <button id="closeAppUpdateModalButton" class="modal-close" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="summary-line">
+        <span>当前版本 <strong id="appUpdateCurrentVersion">-</strong></span>
+        <span>最新版本 <strong id="appUpdateLatestVersion">-</strong></span>
+      </div>
+      <div class="pattern-table-wrap">
+        <div id="appUpdateReleaseNotes" class="update-release-notes">暂无更新日志</div>
+      </div>
+      <div class="modal-footer">
+        <span id="appUpdateHint" class="hint"></span>
+        <div class="modal-footer-actions">
+          <button id="cancelAppUpdateButton" class="secondary" type="button">取消</button>
+          <button id="confirmAppUpdateButton" class="primary" type="button">立即更新</button>
+        </div>
+      </div>
+    </div>
+  </div>
   <script src="/assets/app.js"></script>
 </body>
 </html>
 """
+
+
+def build_index_html() -> str:
+    return INDEX_HTML.replace("__APP_VERSION__", APP_VERSION)
 
 
 APP_CSS = r"""
@@ -1299,8 +1644,20 @@ body {
 }
 .brand { display: flex; gap: 12px; align-items: center; margin-bottom: 36px; }
 .brand-mark { width: 38px; height: 38px; border-radius: 13px; object-fit: cover; display: block; box-shadow: var(--shadow); background: #ffffff; }
-.brand strong { display:block; font-size: 18px; }
-.brand small { color: var(--muted); }
+.brand-copy { min-width: 0; display: grid; gap: 2px; }
+.brand-version {
+  display: inline-flex;
+  width: fit-content;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #e7f1ef;
+  color: var(--primary-strong);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+.brand strong { display:block; font-size: 18px; line-height: 1.2; }
+.brand small { color: var(--muted); line-height: 1.3; }
 .sidebar-nav { display: grid; gap: 8px; margin-bottom: 22px; }
 .nav-link {
   width: 100%;
@@ -1520,6 +1877,23 @@ button:disabled { opacity: .58; cursor: not-allowed; }
 .summary-line { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; color: var(--muted); font-weight: 700; }
 .summary-line span { padding: 9px 12px; border: 1px solid var(--line); border-radius: 999px; background: #f7fafc; }
 .summary-line strong { color: var(--ink); }
+.update-leaving-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+}
+.update-leaving-card {
+  width: min(460px, 100%);
+  padding: 28px;
+  border-radius: 22px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,.92);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+.update-leaving-card h2 { margin: 0 0 10px; font-size: 26px; }
+.update-leaving-card p { margin: 0; color: var(--muted); line-height: 1.7; }
 .regex-cell { font: 13px/1.45 "Cascadia Mono", "Consolas", monospace; overflow-wrap: anywhere; color: var(--ink); }
 .examples-cell { min-width: 0; }
 .examples-scroll {
@@ -1621,6 +1995,12 @@ button:disabled { opacity: .58; cursor: not-allowed; }
   color: #8a5d00;
   box-shadow: 0 10px 26px rgba(138, 93, 0, 0.12);
 }
+.update-notice-button {
+  border-color: #c7d6ea;
+  background: #eef5ff;
+  color: #194b7a;
+  box-shadow: 0 10px 26px rgba(25, 75, 122, 0.10);
+}
 .notice-button[hidden] { display: none !important; }
 .notice-dot {
   width: 10px;
@@ -1684,6 +2064,27 @@ button:disabled { opacity: .58; cursor: not-allowed; }
   flex-wrap: wrap;
   margin-top: 16px;
 }
+.modal-footer-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.update-release-notes {
+  min-height: 180px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #f7fafc;
+  color: var(--ink);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.update-modal .summary-line {
+  margin-bottom: 16px;
+}
 @media (max-width: 980px) {
   .shell { grid-template-columns: 1fr; }
   .sidebar { position: static; }
@@ -1705,6 +2106,17 @@ let builtinRuleRows = [];
 let builtinRuleDefinitions = [];
 let pendingRuleDefinitions = [];
 let pendingRuleState = { count: 0, has_pending: false, notice_seen: true, library_seen: true, show_notice_dot: false, show_library_dot: false };
+let appUpdateState = {
+  supported: false,
+  current_version: "",
+  latest_version: "",
+  update_available: false,
+  release_notes: "",
+  published_at: "",
+  download_url: "",
+  asset_name: "",
+  message: "",
+};
 let latestResultFile = "";
 let availableModels = [];
 let currentProviderName = "DeepSeek";
@@ -2333,6 +2745,102 @@ function applyPendingRuleState(data) {
   renderPendingRuleIndicators();
 }
 
+function renderAppUpdateNotice() {
+  const button = $("updateNoticeButton");
+  if (!button) return;
+  button.hidden = !appUpdateState.update_available;
+}
+
+function applyAppUpdateState(data) {
+  appUpdateState = {
+    supported: Boolean(data?.supported),
+    current_version: String(data?.current_version || ""),
+    latest_version: String(data?.latest_version || ""),
+    update_available: Boolean(data?.update_available),
+    release_notes: String(data?.release_notes || ""),
+    published_at: String(data?.published_at || ""),
+    download_url: String(data?.download_url || ""),
+    asset_name: String(data?.asset_name || ""),
+    message: String(data?.message || ""),
+  };
+  renderAppUpdateNotice();
+}
+
+async function loadAppUpdateInfo() {
+  try {
+    const data = await api("/api/app-update");
+    applyAppUpdateState(data);
+  } catch (error) {
+    applyAppUpdateState({
+      supported: false,
+      current_version: "",
+      latest_version: "",
+      update_available: false,
+      message: error.message,
+    });
+  }
+}
+
+function openAppUpdateModal() {
+  $("appUpdateCurrentVersion").textContent = appUpdateState.current_version || "-";
+  $("appUpdateLatestVersion").textContent = appUpdateState.latest_version || "-";
+  $("appUpdateSummary").textContent = appUpdateState.message
+    ? appUpdateState.message
+    : `当前版本 ${appUpdateState.current_version || "-"}，最新版本 ${appUpdateState.latest_version || "-"}。`;
+  $("appUpdateReleaseNotes").textContent = appUpdateState.release_notes || "暂无更新日志";
+  $("appUpdateHint").textContent = "";
+  $("confirmAppUpdateButton").disabled = !appUpdateState.update_available || !appUpdateState.download_url;
+  $("appUpdateOverlay").hidden = false;
+}
+
+function closeAppUpdateModal() {
+  $("appUpdateOverlay").hidden = true;
+  $("appUpdateHint").textContent = "";
+}
+
+function leavePageForAppUpdate(message) {
+  const safeMessage = escapeHtml(message || "更新已开始，请查看弹出的更新窗口。");
+  document.body.innerHTML = `
+    <div class="update-leaving-screen">
+      <div class="update-leaving-card">
+        <h2>正在更新</h2>
+        <p>${safeMessage}</p>
+      </div>
+    </div>`;
+  const tryCloseWindow = () => {
+    try {
+      window.open("", "_self");
+      window.close();
+    } catch (error) {
+      console.warn(error);
+    }
+  };
+  setTimeout(tryCloseWindow, 200);
+  setTimeout(() => {
+    tryCloseWindow();
+    window.location.replace("about:blank");
+  }, 1200);
+}
+
+async function startAppUpdate() {
+  $("appUpdateHint").textContent = "正在启动更新...";
+  $("confirmAppUpdateButton").disabled = true;
+  try {
+    const data = await api("/api/app-update/start", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    const message = data.message || "更新已开始，当前页面会关闭，并弹出更新窗口显示进度。";
+    $("appUpdateHint").textContent = message;
+    setTimeout(() => {
+      leavePageForAppUpdate(message);
+    }, 180);
+  } catch (error) {
+    $("appUpdateHint").textContent = error.message;
+    $("confirmAppUpdateButton").disabled = false;
+  }
+}
+
 async function loadPendingRules() {
   const data = await api("/api/nontrans-pending-rules");
   applyPendingRuleState(data);
@@ -2592,7 +3100,11 @@ $("addAsciiPatternButton").addEventListener("click", addAsciiPattern);
 $("saveAsciiPatternsButton").addEventListener("click", saveAsciiPatterns);
 $("addBuiltinRuleButton").addEventListener("click", addBuiltinRule);
 $("saveBuiltinRulesButton").addEventListener("click", saveBuiltinRules);
+$("updateNoticeButton").addEventListener("click", openAppUpdateModal);
 $("pendingRuleNoticeButton").addEventListener("click", openPendingRuleModal);
+$("closeAppUpdateModalButton").addEventListener("click", closeAppUpdateModal);
+$("cancelAppUpdateButton").addEventListener("click", closeAppUpdateModal);
+$("confirmAppUpdateButton").addEventListener("click", startAppUpdate);
 $("closePendingRuleModalButton").addEventListener("click", closePendingRuleModal);
 $("pendingRuleSelectAllButton").addEventListener("click", () => setAllPendingRuleSelection(true));
 $("pendingRuleClearSelectionButton").addEventListener("click", () => setAllPendingRuleSelection(false));
@@ -2623,7 +3135,7 @@ document.querySelectorAll(".subnav-link").forEach((button) => {
   button.addEventListener("click", () => setSubtab(button.dataset.subtabGroup, button.dataset.subtabTarget));
 });
 
-Promise.all([loadSettings(), loadAsciiPatterns(), loadPromptTemplates(), loadBuiltinRules(), loadPendingRules()]).then(refreshStatus).catch((error) => {
+Promise.all([loadSettings(), loadAsciiPatterns(), loadPromptTemplates(), loadBuiltinRules(), loadPendingRules(), loadAppUpdateInfo()]).then(refreshStatus).catch((error) => {
   $("statusMessage").textContent = error.message;
 });
 setInterval(refreshStatus, 1500);

@@ -1,9 +1,20 @@
 """Application constants and default prompts for the WebUI pipeline."""
 
 APP_NAME = "AI术语提取工具"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.2"
 CONFIG_VERSION = 6
 RUNTIME_CACHE_VERSION = 3
+UPDATE_REPOSITORY_OWNER = "willwong0908"
+UPDATE_REPOSITORY_NAME = "textforge-toolkit"
+UPDATE_RELEASE_API = "https://api.github.com/repos/{0}/{1}/releases/latest".format(
+    UPDATE_REPOSITORY_OWNER,
+    UPDATE_REPOSITORY_NAME,
+)
+UPDATE_ASSET_NAME_HINTS = [
+    "textforge",
+    "release",
+    "program",
+]
 
 TERM_LIBRARY_COLUMNS = [
     "术语原文",

@@ -22,6 +22,7 @@ excludes = [
 
 datas = [
     ("settings.json", "."),
+    ("logo.png", "."),
 ]
 
 
