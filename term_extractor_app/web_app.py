@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, ConfigDict
 
@@ -852,6 +852,43 @@ def _ai_review_batch_response(batch_id: str, message: str) -> dict:
     }
 
 
+def _ai_review_excel_upload_response(
+    *,
+    batch_id: str,
+    filename: str,
+    metadata: dict,
+    original_file_path: str = "",
+) -> dict:
+    metadata_with_path = {**metadata}
+    if original_file_path:
+        metadata_with_path["original_file_path"] = original_file_path
+    return {
+        "ok": True,
+        "message": "Excel 文件已读取，请设置 Excel 映射。",
+        "file_type": "excel",
+        "batch_id": batch_id,
+        "filename": filename,
+        "batch": {
+            "id": batch_id,
+            "filename": filename,
+            "file_type": "excel",
+            "source_column": "",
+            "target_column": "",
+            "item_count": 0,
+            "source_language": "",
+            "target_language": "",
+            "updated_at": "",
+            "metadata": metadata_with_path,
+        },
+        "preview": [],
+        "headers": metadata["headers"],
+        "headers_by_sheet": metadata["headers_by_sheet"],
+        "columns_by_sheet": metadata["columns_by_sheet"],
+        "sheet_names": metadata["sheet_names"],
+        "needs_column_selection": False,
+    }
+
+
 def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
     task_facade = facade or ExtractionTaskFacade()
     app = FastAPI(title="AI Term Extractor WebUI")
@@ -1329,18 +1366,12 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
                     status="uploaded",
                     metadata={**metadata, "original_file_path": str(file_path)},
                 )
-                return {
-                    "ok": True,
-                    "message": "Excel 文件已读取，请继续选择列或列映射。",
-                    "file_type": file_type,
-                    "batch_id": batch_id,
-                    "filename": filename,
-                    "headers": metadata["headers"],
-                    "headers_by_sheet": metadata["headers_by_sheet"],
-                    "columns_by_sheet": metadata["columns_by_sheet"],
-                    "sheet_names": metadata["sheet_names"],
-                    "needs_column_selection": True,
-                }
+                return _ai_review_excel_upload_response(
+                    batch_id=batch_id,
+                    filename=filename,
+                    metadata=metadata,
+                    original_file_path=str(file_path),
+                )
 
             items = read_ai_review_xliff_items(stored_path, filename)
             language_metadata = read_ai_review_xliff_language_metadata(stored_path)
@@ -1355,6 +1386,50 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
                 batch_id=batch_id,
                 items=items,
                 metadata_update={"preview_ready": True, **language_metadata, "original_file_path": str(file_path)},
+            )
+            return _ai_review_batch_response(batch_id, "XLIFF 读取完成")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="读取失败：{0}".format(exc)) from exc
+
+    @app.post("/api/ai-review/file/upload")
+    async def ai_review_upload_file(file: UploadFile = File(...)):
+        filename = file.filename or "unknown"
+        data = await file.read()
+        if not data:
+            raise HTTPException(status_code=400, detail="上传文件为空。")
+        try:
+            stored_path = save_ai_review_upload_file(filename, data)
+            file_type = detect_ai_review_file_type(stored_path)
+            if file_type == "excel":
+                metadata = read_ai_review_excel_headers(stored_path)
+                batch_id = create_ai_review_batch(
+                    original_filename=filename,
+                    stored_path=stored_path,
+                    file_type=file_type,
+                    status="uploaded",
+                    metadata=metadata,
+                )
+                return _ai_review_excel_upload_response(
+                    batch_id=batch_id,
+                    filename=filename,
+                    metadata=metadata,
+                )
+
+            items = read_ai_review_xliff_items(stored_path, filename)
+            language_metadata = read_ai_review_xliff_language_metadata(stored_path)
+            batch_id = create_ai_review_batch(
+                original_filename=filename,
+                stored_path=stored_path,
+                file_type=file_type,
+                status="uploaded",
+                metadata=language_metadata,
+            )
+            replace_ai_review_batch_items(
+                batch_id=batch_id,
+                items=items,
+                metadata_update={"preview_ready": True, **language_metadata},
             )
             return _ai_review_batch_response(batch_id, "XLIFF 读取完成")
         except ValueError as exc:
@@ -2288,6 +2363,7 @@ INDEX_HTML = """<!doctype html>
                 <span class="secret-field">
                   <input id="reviewFilePath" placeholder="请选择待审校文件" readonly />
                   <button id="chooseReviewFileButton" class="mini-button" type="button">选择文件</button>
+                  <input id="reviewFileInput" type="file" accept=".xlsx,.xlsm,.xlf,.xliff" hidden />
                 </span>
               </label>
               <div class="cross-summary-box">
@@ -2296,24 +2372,13 @@ INDEX_HTML = """<!doctype html>
                 <small id="reviewFileHint">尚未读取文件。</small>
               </div>
             </div>
-            <div id="reviewColumnPanel" class="column-panel hidden review-column-panel">
-              <div class="field">
-                <label for="sourceColumn">原文列</label>
-                <select id="sourceColumn"></select>
-              </div>
-              <div class="field">
-                <label for="targetColumn">译文列</label>
-                <select id="targetColumn"></select>
-              </div>
-              <div class="button-row review-column-actions">
-                <button id="confirmColumnsButton" class="primary" type="button">确认读取</button>
-              </div>
-            </div>
             <div class="actions">
               <button id="openReviewFileButton" class="secondary" type="button" disabled>打开文件</button>
+              <button id="openExcelMappingButton" class="secondary" type="button" disabled>设置 Excel 映射</button>
               <button id="useReviewCacheButton" class="secondary" type="button">使用上次缓存</button>
               <button id="clearReviewCacheButton" class="secondary" type="button">清空缓存</button>
             </div>
+            <p id="excelMappingSummary" class="hint"></p>
           </section>
         </div>
 
@@ -2582,6 +2647,48 @@ INDEX_HTML = """<!doctype html>
       </div>
     </form>
   </dialog>
+  <dialog id="excelMappingDialog" class="dialog wide-dialog">
+    <form method="dialog" class="dialog-body">
+      <div class="dialog-head">
+        <div>
+          <h2>Excel 映射</h2>
+          <p>按 sheet 选择原文列、译文列和信息列。</p>
+        </div>
+        <button id="closeExcelMappingDialogButton" class="icon-button" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="grid two">
+        <div class="field">
+          <label for="mappingSourceLanguageInput">原文语种</label>
+          <input id="mappingSourceLanguageInput" type="text" />
+        </div>
+        <div class="field">
+          <label for="mappingTargetLanguageInput">译文语种</label>
+          <input id="mappingTargetLanguageInput" type="text" />
+        </div>
+      </div>
+      <div class="grid two">
+        <div class="field">
+          <label for="excelMappingPresetSelect">映射预设</label>
+          <select id="excelMappingPresetSelect"></select>
+        </div>
+        <div class="field">
+          <label for="excelMappingPresetNameInput">预设名称</label>
+          <input id="excelMappingPresetNameInput" type="text" placeholder="输入预设名称" />
+        </div>
+      </div>
+      <div class="actions">
+        <button id="applyExcelMappingPresetButton" class="secondary" type="button">应用预设</button>
+        <button id="saveExcelMappingPresetButton" class="secondary" type="button">保存预设</button>
+        <button id="deleteExcelMappingPresetButton" class="danger" type="button">删除预设</button>
+      </div>
+      <div id="excelSheetTabs" class="sheet-tabs"></div>
+      <div id="excelMappingColumns" class="excel-mapping-columns"></div>
+      <div class="dialog-actions">
+        <button id="applyExcelMappingButton" type="button">确认读取</button>
+        <button id="cancelExcelMappingDialogButton" class="secondary" type="button">取消</button>
+      </div>
+    </form>
+  </dialog>
   <div id="appUpdateOverlay" class="modal-overlay" hidden>
     <div class="modal-card notice-modal update-modal">
       <div class="modal-header">
@@ -2711,6 +2818,9 @@ body {
   display: grid;
   gap: 6px;
   padding: 0 10px 10px;
+}
+.nav-accordion:not([open]) > .nav-submenu {
+  display: none;
 }
 .nav-link {
   width: 100%;
@@ -3246,6 +3356,148 @@ button:disabled { opacity: .58; cursor: not-allowed; }
 .hero-metrics { margin-bottom: 10px; }
 .notice-list { display: grid; gap: 10px; color: var(--ink); }
 .notice-list div { padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: #f7fafc; }
+.dialog {
+  width: min(760px, calc(100vw - 36px));
+  max-height: calc(100vh - 48px);
+  border: 0;
+  border-radius: 18px;
+  padding: 0;
+  background: transparent;
+}
+.dialog::backdrop { background: rgba(15, 23, 42, 0.38); }
+.wide-dialog { width: min(1120px, calc(100vw - 36px)); }
+.dialog-body {
+  display: grid;
+  gap: 16px;
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: var(--shadow);
+}
+.dialog-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 16px;
+}
+.dialog-head h2 { margin: 0 0 6px; font-size: 22px; }
+.dialog-head p { margin: 0; color: var(--muted); line-height: 1.55; }
+.dialog-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+.icon-button {
+  width: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-radius: 999px;
+  font-size: 20px;
+  line-height: 1;
+}
+.field { display: grid; gap: 7px; min-width: 0; }
+.field label { margin: 0; }
+.field textarea {
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+  border: 1px solid #cbd8e6;
+  border-radius: 12px;
+  padding: 11px 12px;
+  font: inherit;
+}
+.directional-items {
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  overflow: auto;
+}
+.directional-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f7fafc;
+}
+.directional-item input[type="checkbox"] { width: 18px; min-height: 18px; margin: 0; }
+.sheet-tabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.sheet-tab {
+  min-height: 36px;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #f7fafc;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.sheet-tab.active {
+  border-color: rgba(31,111,104,.35);
+  background: #e8f2ef;
+  color: var(--primary-strong);
+}
+.excel-mapping-columns {
+  display: grid;
+  gap: 10px;
+  max-height: min(520px, 52vh);
+  overflow: auto;
+  padding-right: 4px;
+}
+.mapping-row {
+  display: grid;
+  grid-template-columns: 58px minmax(160px, 1fr) 86px minmax(150px, .8fr) minmax(150px, .8fr) minmax(130px, .7fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f8fbfd;
+}
+.mapping-col-id {
+  color: var(--primary-strong);
+  font-weight: 800;
+}
+.mapping-header {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-weight: 700;
+}
+.mapping-row select,
+.mapping-row input[type="text"] {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 9px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+.check-line.disabled-line { opacity: .55; }
+.review-log-list {
+  display: grid;
+  gap: 8px;
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  padding-left: 20px;
+}
+.review-log-list li {
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.review-log-list li.error { color: var(--danger); }
 .progress { height: 12px; border-radius: 999px; background: #dfe8f2; overflow: hidden; margin-bottom: 14px; }
 .progress span { display:block; height: 100%; width: 0; background: linear-gradient(90deg, var(--primary), #e7b95e); transition: width .25s ease; }
 .hint { color: var(--primary-strong); font-weight: 700; }
@@ -3404,6 +3656,11 @@ let aiReviewTaskPoller = null;
 let aiReviewPromptTemplates = [];
 let aiReviewDirectionalTemplates = [];
 let aiReviewForbiddenTemplates = [];
+let aiReviewExcelMappingPresets = [];
+let aiReviewSheetNames = [];
+let aiReviewColumnsBySheet = {};
+let aiReviewExcelMappingState = {};
+let aiReviewActiveSheetName = "";
 const TASK_STATUS_BY_PAGE = {
   overviewPage: {
     taskLabel: "文本预处理工具",
@@ -3780,32 +4037,41 @@ function renderAiReviewPreview(items) {
   });
 }
 
-function renderAiReviewColumnPanel(data) {
-  const panel = $("reviewColumnPanel");
-  const sourceSelect = $("sourceColumn");
-  const targetSelect = $("targetColumn");
-  const headers = Array.isArray(data?.headers) ? data.headers : [];
-  sourceSelect.innerHTML = "";
-  targetSelect.innerHTML = "";
-  headers.forEach((header) => {
-    sourceSelect.appendChild(new Option(String(header || ""), String(header || "")));
-    targetSelect.appendChild(new Option(String(header || ""), String(header || "")));
+function initializeAiReviewExcelMapping(data) {
+  aiReviewSheetNames = Array.isArray(data?.sheet_names) ? data.sheet_names : [];
+  aiReviewColumnsBySheet = data?.columns_by_sheet || {};
+  aiReviewActiveSheetName = aiReviewSheetNames[0] || "";
+  aiReviewExcelMappingState = {};
+  aiReviewSheetNames.forEach((sheetName) => {
+    aiReviewExcelMappingState[sheetName] = { sources: [], targets: {}, infos: {} };
   });
-  if (headers.length > 1) {
-    targetSelect.selectedIndex = 1;
-  }
-  panel.classList.toggle("hidden", !(data?.needs_column_selection && headers.length));
+  $("excelMappingSummary").textContent = "";
 }
 
 function renderAiReviewBatch(data) {
   const batch = data?.batch || null;
   aiReviewBatch = batch;
+  const isExcel = String(batch?.file_type || "") === "excel";
   $("reviewBatchCount").textContent = Number(batch?.item_count || 0);
   $("reviewFileHint").textContent = data?.message || "尚未读取文件。";
   $("openReviewFileButton").disabled = !batch?.metadata?.original_file_path;
+  $("openExcelMappingButton").disabled = !isExcel;
   $("reviewFilePath").value = String(batch?.metadata?.original_file_path || "");
   $("sourceLanguageInput").value = String(batch?.source_language || $("sourceLanguageInput").value || "");
   $("targetLanguageInput").value = String(batch?.target_language || $("targetLanguageInput").value || "");
+  const excelMapping = batch?.metadata?.excel_mapping || null;
+  if (excelMapping) {
+    $("excelMappingSummary").textContent = summarizeAiReviewExcelMapping(excelMapping);
+  } else if (!isExcel) {
+    $("excelMappingSummary").textContent = "";
+  }
+  if (isExcel && !excelMapping) {
+    $("openExcelMappingButton").disabled = !aiReviewSheetNames.length;
+  }
+  if (isExcel && !excelMapping) {
+    renderAiReviewPreview([]);
+    return;
+  }
   renderAiReviewPreview(data?.preview || []);
 }
 
@@ -3853,6 +4119,306 @@ function renderAiReviewForbiddenTemplateOptions() {
   aiReviewForbiddenTemplates.forEach((item) => {
     select.appendChild(new Option(String(item.name || ""), String(item.id || "")));
   });
+}
+
+function summarizeAiReviewExcelMapping(mapping) {
+  const sheets = Array.isArray(mapping?.sheets) ? mapping.sheets : [];
+  const count = sheets.reduce((total, sheet) => total + Number((sheet.mappings || []).length || 0), 0);
+  return count > 0 ? `已配置 ${count} 组原文 / 译文列` : "";
+}
+
+function renderAiReviewExcelMappingPresets() {
+  const select = $("excelMappingPresetSelect");
+  select.innerHTML = "";
+  select.appendChild(new Option("选择预设", ""));
+  aiReviewExcelMappingPresets.forEach((item) => {
+    select.appendChild(new Option(String(item.name || ""), String(item.id || "")));
+  });
+}
+
+async function loadAiReviewExcelMappingPresets() {
+  const data = await api("/api/ai-review/excel-mapping-presets");
+  aiReviewExcelMappingPresets = Array.isArray(data.presets) ? data.presets : [];
+  renderAiReviewExcelMappingPresets();
+}
+
+function aiReviewColumnLabel(sheetName, columnIndex) {
+  const columns = Array.isArray(aiReviewColumnsBySheet[sheetName]) ? aiReviewColumnsBySheet[sheetName] : [];
+  const column = columns.find((item) => Number(item.index) === Number(columnIndex));
+  if (!column) {
+    return `第 ${Number(columnIndex) + 1} 列`;
+  }
+  return `${column.letter || ""}${column.header ? ` ${column.header}` : ""}`.trim();
+}
+
+function syncAiReviewActiveSheetMapping() {
+  const sheetName = aiReviewActiveSheetName;
+  if (!sheetName) return;
+  const sources = [];
+  const targets = {};
+  const infos = {};
+  $("excelMappingColumns").querySelectorAll(".mapping-row").forEach((row) => {
+    const columnIndex = Number(row.dataset.columnIndex || 0);
+    if (row.querySelector(".mapping-source").checked) {
+      sources.push(columnIndex);
+    }
+    const targetValue = row.querySelector(".mapping-target").value;
+    if (targetValue !== "") {
+      targets[columnIndex] = Number(targetValue);
+    }
+    const infoValue = row.querySelector(".mapping-info").value;
+    if (infoValue !== "" && targetValue === "") {
+      infos[columnIndex] = {
+        sourceColumns: [Number(infoValue)],
+        category: row.querySelector(".mapping-info-category").value.trim(),
+      };
+    }
+  });
+  aiReviewExcelMappingState[sheetName] = { sources, targets, infos };
+}
+
+function renderAiReviewExcelSheetTabs() {
+  const container = $("excelSheetTabs");
+  container.innerHTML = "";
+  aiReviewSheetNames.forEach((sheetName) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `sheet-tab ${sheetName === aiReviewActiveSheetName ? "active" : ""}`.trim();
+    button.textContent = String(sheetName || "");
+    button.addEventListener("click", () => {
+      syncAiReviewActiveSheetMapping();
+      aiReviewActiveSheetName = sheetName;
+      renderAiReviewExcelMappingDialog();
+    });
+    container.appendChild(button);
+  });
+}
+
+function renderAiReviewExcelMappingColumns() {
+  const sheetName = aiReviewActiveSheetName;
+  const columns = Array.isArray(aiReviewColumnsBySheet[sheetName]) ? aiReviewColumnsBySheet[sheetName] : [];
+  const sheetState = aiReviewExcelMappingState[sheetName] || { sources: [], targets: {}, infos: {} };
+  const container = $("excelMappingColumns");
+  container.innerHTML = "";
+  if (!columns.length) {
+    container.innerHTML = '<div class="cross-empty-state">当前 sheet 没有可用列。</div>';
+    return;
+  }
+  columns.forEach((column) => {
+    const row = document.createElement("div");
+    row.className = "mapping-row";
+    row.dataset.columnIndex = String(column.index);
+    const sourceChecked = Array.isArray(sheetState.sources) && sheetState.sources.includes(column.index);
+    const targetValue = sheetState.targets[column.index] === undefined ? "" : String(sheetState.targets[column.index]);
+    const infoValue = sheetState.infos[column.index]?.sourceColumns?.[0] === undefined
+      ? ""
+      : String(sheetState.infos[column.index].sourceColumns[0]);
+    row.innerHTML = `
+      <div class="mapping-col-id">${escapeHtml(String(column.letter || ""))}</div>
+      <div class="mapping-header">${escapeHtml(String(column.header || ""))}</div>
+      <label class="check-line"><input class="mapping-source" type="checkbox" ${sourceChecked ? "checked" : ""} /><span>原文</span></label>
+      <select class="mapping-target"><option value="">非译文列</option></select>
+      <select class="mapping-info"><option value="">非信息列</option></select>
+      <input class="mapping-info-category" type="text" placeholder="信息类别" value="${escapeHtml(String(sheetState.infos[column.index]?.category || ""))}" />`;
+    const targetSelect = row.querySelector(".mapping-target");
+    const infoSelect = row.querySelector(".mapping-info");
+    const sourceList = Array.isArray(sheetState.sources) ? sheetState.sources : [];
+    sourceList.forEach((sourceIndex) => {
+      targetSelect.appendChild(new Option(`译文 -> ${aiReviewColumnLabel(sheetName, sourceIndex)}`, String(sourceIndex)));
+      infoSelect.appendChild(new Option(`信息 -> ${aiReviewColumnLabel(sheetName, sourceIndex)}`, String(sourceIndex)));
+    });
+    targetSelect.value = targetValue;
+    infoSelect.value = infoValue;
+    targetSelect.disabled = !sourceList.length || sourceChecked;
+    infoSelect.disabled = !sourceList.length || sourceChecked;
+    const categoryInput = row.querySelector(".mapping-info-category");
+    categoryInput.disabled = infoSelect.disabled || !infoSelect.value;
+    row.querySelector(".mapping-source").addEventListener("change", () => {
+      syncAiReviewActiveSheetMapping();
+      renderAiReviewExcelMappingDialog();
+    });
+    targetSelect.addEventListener("change", () => {
+      if (targetSelect.value !== "") {
+        infoSelect.value = "";
+        categoryInput.disabled = true;
+      }
+      syncAiReviewActiveSheetMapping();
+    });
+    infoSelect.addEventListener("change", () => {
+      if (infoSelect.value !== "") {
+        targetSelect.value = "";
+        categoryInput.disabled = false;
+      } else {
+        categoryInput.disabled = infoSelect.disabled;
+      }
+      syncAiReviewActiveSheetMapping();
+    });
+    categoryInput.addEventListener("input", syncAiReviewActiveSheetMapping);
+    container.appendChild(row);
+  });
+}
+
+function renderAiReviewExcelMappingDialog() {
+  renderAiReviewExcelSheetTabs();
+  renderAiReviewExcelMappingColumns();
+}
+
+function buildAiReviewExcelMapping() {
+  syncAiReviewActiveSheetMapping();
+  const sheets = aiReviewSheetNames.map((sheetName) => {
+    const sheetState = aiReviewExcelMappingState[sheetName] || { sources: [], targets: {}, infos: {} };
+    const mappings = (sheetState.sources || []).map((sourceColumn) => {
+      const targetEntry = Object.entries(sheetState.targets || {}).find(([, sourceIndex]) => Number(sourceIndex) === Number(sourceColumn));
+      const infoColumns = Object.entries(sheetState.infos || {})
+        .filter(([, info]) => Array.isArray(info.sourceColumns) && info.sourceColumns.includes(sourceColumn))
+        .map(([column, info]) => ({ column: Number(column), category: String(info.category || "") }));
+      return {
+        source_column: Number(sourceColumn),
+        target_column: targetEntry ? Number(targetEntry[0]) : null,
+        info_columns: infoColumns,
+      };
+    });
+    return { sheet_name: sheetName, mappings };
+  });
+  return {
+    source_language: $("mappingSourceLanguageInput").value.trim(),
+    target_language: $("mappingTargetLanguageInput").value.trim(),
+    sheets,
+  };
+}
+
+function validateAiReviewExcelMapping(mapping) {
+  const errors = [];
+  (mapping.sheets || []).forEach((sheet) => {
+    const usedTargets = new Set();
+    (sheet.mappings || []).forEach((item) => {
+      const label = aiReviewColumnLabel(sheet.sheet_name, item.source_column);
+      if (item.target_column === null || item.target_column === undefined) {
+        errors.push(`${sheet.sheet_name} 的 ${label} 缺少译文列`);
+      } else if (usedTargets.has(item.target_column)) {
+        errors.push(`${sheet.sheet_name} 的 ${aiReviewColumnLabel(sheet.sheet_name, item.target_column)} 被多个原文列共用`);
+      } else if (item.target_column === item.source_column) {
+        errors.push(`${sheet.sheet_name} 的 ${label} 不能同时作为译文列`);
+      }
+      (item.info_columns || []).forEach((info) => {
+        if (info.column === item.target_column) {
+          errors.push(`${sheet.sheet_name} 的 ${aiReviewColumnLabel(sheet.sheet_name, info.column)} 不能同时作为译文列和信息列`);
+        }
+        if (info.column === item.source_column) {
+          errors.push(`${sheet.sheet_name} 的 ${aiReviewColumnLabel(sheet.sheet_name, info.column)} 不能同时作为原文列和信息列`);
+        }
+      });
+      usedTargets.add(item.target_column);
+    });
+  });
+  if (!(mapping.sheets || []).some((sheet) => Array.isArray(sheet.mappings) && sheet.mappings.length)) {
+    errors.push("请至少选择一组原文列和译文列");
+  }
+  return errors;
+}
+
+function applyAiReviewExcelMappingPresetToState(mapping) {
+  $("mappingSourceLanguageInput").value = String(mapping?.source_language || "");
+  $("mappingTargetLanguageInput").value = String(mapping?.target_language || "");
+  const nextState = {};
+  aiReviewSheetNames.forEach((sheetName) => {
+    nextState[sheetName] = { sources: [], targets: {}, infos: {} };
+  });
+  (mapping?.sheets || []).forEach((sheet) => {
+    if (!nextState[sheet.sheet_name]) return;
+    const validColumns = new Set((aiReviewColumnsBySheet[sheet.sheet_name] || []).map((column) => Number(column.index)));
+    (sheet.mappings || []).forEach((item) => {
+      if (!validColumns.has(Number(item.source_column)) || !validColumns.has(Number(item.target_column))) return;
+      nextState[sheet.sheet_name].sources.push(Number(item.source_column));
+      nextState[sheet.sheet_name].targets[Number(item.target_column)] = Number(item.source_column);
+      (item.info_columns || []).forEach((info) => {
+        if (!validColumns.has(Number(info.column))) return;
+        const current = nextState[sheet.sheet_name].infos[Number(info.column)] || { sourceColumns: [], category: String(info.category || "") };
+        if (!current.sourceColumns.includes(Number(item.source_column))) {
+          current.sourceColumns.push(Number(item.source_column));
+        }
+        if (info.category && !current.category) {
+          current.category = String(info.category);
+        }
+        nextState[sheet.sheet_name].infos[Number(info.column)] = current;
+      });
+    });
+  });
+  aiReviewExcelMappingState = nextState;
+}
+
+async function openAiReviewExcelMappingDialog() {
+  if (!aiReviewBatch?.id || !aiReviewSheetNames.length) {
+    throw new Error("请先读取 Excel 文件");
+  }
+  $("mappingSourceLanguageInput").value = $("sourceLanguageInput").value || "";
+  $("mappingTargetLanguageInput").value = $("targetLanguageInput").value || "";
+  await loadAiReviewExcelMappingPresets();
+  renderAiReviewExcelMappingDialog();
+  $("excelMappingDialog").showModal();
+}
+
+async function applyAiReviewExcelMapping() {
+  if (!aiReviewBatch?.id) {
+    throw new Error("请先读取 Excel 文件");
+  }
+  const mapping = buildAiReviewExcelMapping();
+  const errors = validateAiReviewExcelMapping(mapping);
+  if (errors.length) {
+    throw new Error(errors[0]);
+  }
+  const data = await api("/api/ai-review/select-excel-mapping", {
+    method: "POST",
+    body: JSON.stringify({
+      batch_id: aiReviewBatch.id,
+      mapping,
+    }),
+  });
+  $("sourceLanguageInput").value = mapping.source_language || "";
+  $("targetLanguageInput").value = mapping.target_language || "";
+  $("excelMappingSummary").textContent = summarizeAiReviewExcelMapping(mapping);
+  $("excelMappingDialog").close();
+  renderAiReviewBatch(data);
+}
+
+async function saveAiReviewExcelMappingPreset() {
+  const mapping = buildAiReviewExcelMapping();
+  const errors = validateAiReviewExcelMapping(mapping);
+  if (errors.length) {
+    throw new Error(errors[0]);
+  }
+  const data = await api("/api/ai-review/excel-mapping-presets", {
+    method: "POST",
+    body: JSON.stringify({
+      id: null,
+      name: $("excelMappingPresetNameInput").value.trim() || "未命名映射预设",
+      mapping,
+    }),
+  });
+  await loadAiReviewExcelMappingPresets();
+  $("excelMappingPresetSelect").value = String(data?.preset?.id || "");
+}
+
+async function applyAiReviewExcelMappingPreset() {
+  const presetId = $("excelMappingPresetSelect").value;
+  if (!presetId) return;
+  const data = await api(`/api/ai-review/excel-mapping-presets/${encodeURIComponent(presetId)}`);
+  applyAiReviewExcelMappingPresetToState(data?.preset?.mapping || {});
+  $("excelMappingPresetNameInput").value = String(data?.preset?.name || "");
+  renderAiReviewExcelMappingDialog();
+}
+
+async function deleteAiReviewExcelMappingPreset() {
+  const presetId = $("excelMappingPresetSelect").value;
+  if (!presetId) return;
+  if (!window.confirm("确定删除这个映射预设吗？")) {
+    return;
+  }
+  await api(`/api/ai-review/excel-mapping-presets/${encodeURIComponent(presetId)}`, {
+    method: "DELETE",
+  });
+  $("excelMappingPresetNameInput").value = "";
+  await loadAiReviewExcelMappingPresets();
 }
 
 function fillAiReviewPromptDialog(template = {}) {
@@ -4030,6 +4596,7 @@ async function saveForbiddenTemplateFromDialog() {
 }
 
 function renderAiReviewResults(task, results) {
+  renderAiReviewResultHead(task || {});
   const outputFile = String(task?.output_file || "");
   $("reviewProgress").textContent = String(task?.status_label || task?.status || "尚未开始");
   $("outputPath").textContent = outputFile || "暂无输出";
@@ -4040,19 +4607,47 @@ function renderAiReviewResults(task, results) {
   body.innerHTML = "";
   const items = Array.isArray(results) ? results : [];
   if (!items.length) {
-    body.innerHTML = '<tr><td colspan="6" class="empty-cell">暂无审校结果</td></tr>';
+    const colspan = Number($("reviewResultHead").querySelectorAll("th").length || 6);
+    body.innerHTML = `<tr><td colspan="${colspan}" class="empty-cell">暂无审校结果</td></tr>`;
     return;
   }
+  const config = task?.config || {};
+  const isDirectional = config.mode === "directional";
+  const isForbiddenOnly = config.mode === "forbidden_only";
+  const hasForbidden = Boolean(config.enable_forbidden_check);
+  const reviewTypes = Array.isArray(config.review_types) ? config.review_types : [];
   items.forEach((item) => {
     const tr = document.createElement("tr");
-    const cells = [
-      item.source_text || "",
-      item.target_text || "",
-      item.has_issue ? "是" : "否",
-      item.issue_type || "",
-      item.issue || "",
-      item.suggestion || "",
-    ];
+    let cells = [];
+    if (isForbiddenOnly) {
+      cells = [
+        item.source_text || "",
+        item.target_text || "",
+        item.matched_words || "",
+      ];
+    } else if (isDirectional) {
+      const checks = item.checks || {};
+      cells = [
+        item.source_text || "",
+        item.target_text || "",
+        ...reviewTypes.map((reviewType) => {
+          const key = String(reviewType?.key || "");
+          return item.error_message || checks[key] || "";
+        }),
+      ];
+    } else {
+      cells = [
+        item.source_text || "",
+        item.target_text || "",
+        item.has_issue === null ? "" : item.has_issue ? "是" : "否",
+        item.issue_type || "",
+        item.error_message || item.issue || "",
+        item.suggestion || "",
+      ];
+    }
+    if (hasForbidden && !isForbiddenOnly) {
+      cells.push(item.matched_words || "");
+    }
     cells.forEach((value) => {
       const td = document.createElement("td");
       td.textContent = String(value || "");
@@ -4060,6 +4655,31 @@ function renderAiReviewResults(task, results) {
     });
     body.appendChild(tr);
   });
+}
+
+function renderAiReviewResultHead(task) {
+  const config = task?.config || {};
+  const isDirectional = config.mode === "directional";
+  const isForbiddenOnly = config.mode === "forbidden_only";
+  const hasForbidden = Boolean(config.enable_forbidden_check);
+  const reviewTypes = Array.isArray(config.review_types) ? config.review_types : [];
+  const headers = isForbiddenOnly
+    ? ["原文", "译文", "禁用词检查情况"]
+    : isDirectional
+      ? ["原文", "译文", ...reviewTypes.map((item) => String(item?.key || ""))]
+      : ["原文", "译文", "是否有问题", "问题类型", "问题说明", "修改建议"];
+  if (hasForbidden && !isForbiddenOnly) {
+    headers.push("禁用词检查情况");
+  }
+  const head = $("reviewResultHead");
+  head.innerHTML = "";
+  const tr = document.createElement("tr");
+  headers.forEach((header) => {
+    const th = document.createElement("th");
+    th.textContent = header;
+    tr.appendChild(th);
+  });
+  head.appendChild(tr);
 }
 
 function appendAiReviewLogs(logs) {
@@ -4095,38 +4715,74 @@ async function loadAiReviewForbiddenTemplates() {
 }
 
 async function chooseAiReviewFile() {
-  const data = await api("/api/dialog/select-review-file");
-  if (data.cancelled || !data.file_path) {
+  $("reviewFileInput").click();
+}
+
+async function uploadAiReviewFile(file) {
+  if (!file) {
     return;
   }
-  $("reviewFilePath").value = data.file_path;
-  await loadAiReviewFile(data.file_path);
+  resetAiReviewTaskView();
+  $("reviewFilePath").value = file.name || "";
+  $("reviewFileHint").textContent = "正在读取文件...";
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await fetch("/api/ai-review/file/upload", {
+    method: "POST",
+    body: formData,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.detail || data.message || response.statusText || "读取失败");
+  }
+  if (String(data.file_type || "") === "excel") {
+    initializeAiReviewExcelMapping(data);
+    $("openExcelMappingButton").disabled = !aiReviewSheetNames.length;
+  } else {
+    aiReviewSheetNames = [];
+    aiReviewColumnsBySheet = {};
+    aiReviewExcelMappingState = {};
+    aiReviewActiveSheetName = "";
+    $("excelMappingSummary").textContent = "";
+  }
+  renderAiReviewBatch(data);
 }
 
 async function loadAiReviewFile(filePath) {
+  resetAiReviewTaskView();
   const data = await api("/api/ai-review/file/load", {
     method: "POST",
     body: JSON.stringify({ file_path: filePath }),
   });
   $("reviewFileHint").textContent = data.message || "读取完成";
+  if (String(data.file_type || "") === "excel") {
+    initializeAiReviewExcelMapping(data);
+    $("openExcelMappingButton").disabled = !aiReviewSheetNames.length;
+  } else {
+    aiReviewSheetNames = [];
+    aiReviewColumnsBySheet = {};
+    aiReviewExcelMappingState = {};
+    aiReviewActiveSheetName = "";
+    $("excelMappingSummary").textContent = "";
+  }
   renderAiReviewBatch(data);
-  renderAiReviewColumnPanel(data);
 }
 
-async function confirmAiReviewColumns() {
-  if (!aiReviewBatch?.id) {
-    throw new Error("请先读取文件");
+function resetAiReviewTaskView() {
+  aiReviewTaskId = "";
+  aiReviewLogCursor = 0;
+  if (aiReviewTaskPoller) {
+    window.clearInterval(aiReviewTaskPoller);
+    aiReviewTaskPoller = null;
   }
-  const data = await api("/api/ai-review/select-columns", {
-    method: "POST",
-    body: JSON.stringify({
-      batch_id: aiReviewBatch.id,
-      source_column: $("sourceColumn").value,
-      target_column: $("targetColumn").value,
-    }),
-  });
-  renderAiReviewBatch(data);
-  $("reviewColumnPanel").classList.add("hidden");
+  $("reviewLogList").innerHTML = "";
+  renderAiReviewResultHead({});
+  $("reviewResultBody").innerHTML = '<tr><td colspan="6" class="empty-cell">暂无审校结果</td></tr>';
+  $("outputPanel").classList.add("hidden");
+  $("outputPath").textContent = "暂无输出";
+  $("openOutputFileButton").disabled = true;
+  $("reviewProgress").textContent = "尚未开始";
+  $("reviewTaskHint").textContent = "";
 }
 
 async function useAiReviewCache() {
@@ -4135,7 +4791,6 @@ async function useAiReviewCache() {
     body: "{}",
   });
   renderAiReviewBatch(data);
-  renderAiReviewColumnPanel(data);
 }
 
 async function clearAiReviewCache() {
@@ -4144,11 +4799,28 @@ async function clearAiReviewCache() {
     body: "{}",
   });
   aiReviewBatch = null;
+  aiReviewSheetNames = [];
+  aiReviewColumnsBySheet = {};
+  aiReviewExcelMappingState = {};
+  aiReviewActiveSheetName = "";
+  aiReviewTaskId = "";
+  aiReviewLogCursor = 0;
+  if (aiReviewTaskPoller) {
+    window.clearInterval(aiReviewTaskPoller);
+    aiReviewTaskPoller = null;
+  }
   $("reviewBatchCount").textContent = "0";
   $("reviewFileHint").textContent = "读取缓存已清空";
   $("reviewFilePath").value = "";
-  $("reviewColumnPanel").classList.add("hidden");
+  $("excelMappingSummary").textContent = "";
+  $("openExcelMappingButton").disabled = true;
+  $("reviewLogList").innerHTML = "";
+  $("reviewProgress").textContent = "尚未开始";
+  $("outputPanel").classList.add("hidden");
+  $("outputPath").textContent = "暂无输出";
+  renderAiReviewResultHead({});
   renderAiReviewPreview([]);
+  $("reviewResultBody").innerHTML = '<tr><td colspan="6" class="empty-cell">暂无审校结果</td></tr>';
 }
 
 async function openAiReviewFile() {
@@ -4259,7 +4931,6 @@ async function loadLatestAiReviewCache() {
     return;
   }
   renderAiReviewBatch(data);
-  renderAiReviewColumnPanel(data);
 }
 
 function setCrossExcelOutput(filePath, message = "") {
@@ -5376,7 +6047,16 @@ $("clearCrossHeadersButton").addEventListener("click", () => setCrossExcelHeader
 $("chooseReviewFileButton").addEventListener("click", () => chooseAiReviewFile().catch((error) => {
   $("reviewTaskHint").textContent = error.message;
 }));
-$("confirmColumnsButton").addEventListener("click", () => confirmAiReviewColumns().catch((error) => {
+$("reviewFileInput").addEventListener("change", () => {
+  const file = $("reviewFileInput").files?.[0];
+  uploadAiReviewFile(file).catch((error) => {
+    $("reviewTaskHint").textContent = error.message;
+    $("reviewFileHint").textContent = error.message;
+  }).finally(() => {
+    $("reviewFileInput").value = "";
+  });
+});
+$("openExcelMappingButton").addEventListener("click", () => openAiReviewExcelMappingDialog().catch((error) => {
   $("reviewTaskHint").textContent = error.message;
 }));
 $("useReviewCacheButton").addEventListener("click", () => useAiReviewCache().catch((error) => {
@@ -5452,6 +6132,20 @@ $("saveForbiddenButton").addEventListener("click", () => saveForbiddenTemplateFr
 }));
 $("cancelForbiddenDialogButton").addEventListener("click", () => $("forbiddenDialog").close());
 $("closeForbiddenDialogButton").addEventListener("click", () => $("forbiddenDialog").close());
+$("applyExcelMappingButton").addEventListener("click", () => applyAiReviewExcelMapping().catch((error) => {
+  $("reviewTaskHint").textContent = error.message;
+}));
+$("saveExcelMappingPresetButton").addEventListener("click", () => saveAiReviewExcelMappingPreset().catch((error) => {
+  $("reviewTaskHint").textContent = error.message;
+}));
+$("applyExcelMappingPresetButton").addEventListener("click", () => applyAiReviewExcelMappingPreset().catch((error) => {
+  $("reviewTaskHint").textContent = error.message;
+}));
+$("deleteExcelMappingPresetButton").addEventListener("click", () => deleteAiReviewExcelMappingPreset().catch((error) => {
+  $("reviewTaskHint").textContent = error.message;
+}));
+$("cancelExcelMappingDialogButton").addEventListener("click", () => $("excelMappingDialog").close());
+$("closeExcelMappingDialogButton").addEventListener("click", () => $("excelMappingDialog").close());
 $("openOutputDirButton").addEventListener("click", () => openAiReviewOutputDir().catch((error) => {
   $("reviewTaskHint").textContent = error.message;
 }));
