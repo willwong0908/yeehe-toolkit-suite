@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-set "APP_TITLE=AI Term Extractor WebUI"
+set "APP_TITLE=译禾工具合集"
 title %APP_TITLE%
 
 echo ==============================================
@@ -24,8 +24,4 @@ if exist "%~dp0program\AI_Term_Extractor_WebUI.exe" (
 ) else (
   python term_extractor_app\web_app.py
 )
-
-echo.
-echo WebUI stopped.
-echo Press any key to close this window...
-pause >nul
+exit /b %ERRORLEVEL%
