@@ -358,6 +358,17 @@ def _request_with_retry(
                 }
             text = json.dumps(payload, ensure_ascii=False)
             user_prompt = _build_user_prompt(config, text, any(_item_info(item) for item in package))
+            _add_log(
+                task_id,
+                "debug",
+                _format_ai_request_log(
+                    attempt=attempt,
+                    model=model,
+                    system_prompt=config["system_prompt"],
+                    user_prompt=user_prompt,
+                    item_count=len(package),
+                ),
+            )
             content = review_chat(
                 api_key,
                 model,
@@ -365,10 +376,12 @@ def _request_with_retry(
                 user_prompt,
                 enable_thinking=bool(config.get("enable_thinking", False)),
             )
+            _add_log(task_id, "debug", "AI 返回内容：\n" + content)
             parsed = _parse_json_object(content)
             items = parsed.get("items")
             if not isinstance(items, list):
                 raise ReviewTaskError("AI 返回 JSON 中缺少 items 数组")
+            _add_log(task_id, "debug", f"AI 返回校验通过：{len(items)} 条")
             return items
         except (SharedProviderError, ReviewTaskError, json.JSONDecodeError) as exc:
             last_error = exc
@@ -502,6 +515,23 @@ def _build_user_prompt(config: dict[str, Any], text: str, has_info: bool) -> str
         )
     prompt = config["user_prompt"].replace("{text}", text)
     return "\n".join([*prefixes, prompt]) if prefixes else prompt
+
+
+def _format_ai_request_log(
+    *,
+    attempt: int,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    item_count: int,
+) -> str:
+    return (
+        f"AI 请求 attempt={attempt} model={model} item_count={item_count}\n"
+        "[system]\n"
+        f"{system_prompt}\n"
+        "[user]\n"
+        f"{user_prompt}"
+    )
 
 
 def _cache_key(
@@ -651,14 +681,16 @@ def _update_task(task_id: str, **fields: Any) -> None:
 
 
 def _add_log(task_id: str, level: str, message: str) -> None:
+    timestamp = utc_now()
     with get_connection() as conn:
         conn.execute(
             """
             INSERT INTO review_task_logs (task_id, level, message, created_at)
             VALUES (?, ?, ?, ?)
             """,
-            (task_id, level, message, utc_now()),
+            (task_id, level, message, timestamp),
         )
+    print(f"[AI_REVIEW][{timestamp}][{level.upper()}][{task_id}] {message}", flush=True)
 
 
 def _task_to_dict(row: Any) -> dict[str, Any]:

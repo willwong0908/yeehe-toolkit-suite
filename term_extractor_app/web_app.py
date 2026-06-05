@@ -3512,11 +3512,13 @@ button:disabled { opacity: .58; cursor: not-allowed; }
   padding-left: 20px;
 }
 .review-log-list li {
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.5;
   color: var(--muted);
 }
 .review-log-list li.error { color: var(--danger); }
+.review-log-list li.debug { color: #496579; }
 .progress { height: 12px; border-radius: 999px; background: #dfe8f2; overflow: hidden; margin-bottom: 14px; }
 .progress span { display:block; height: 100%; width: 0; background: linear-gradient(90deg, var(--primary), #e7b95e); transition: width .25s ease; }
 .hint { color: var(--primary-strong); font-weight: 700; }
@@ -4728,6 +4730,8 @@ function appendAiReviewLogs(logs) {
     li.textContent = `${String(item.created_at || "")} ${String(item.message || "")}`.trim();
     if (String(item.level || "").toLowerCase() === "error") {
       li.classList.add("error");
+    } else if (String(item.level || "").toLowerCase() === "debug") {
+      li.classList.add("debug");
     }
     list.appendChild(li);
   });

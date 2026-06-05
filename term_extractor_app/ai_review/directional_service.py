@@ -6,17 +6,34 @@ from typing import Any
 from .database import dumps_json, get_connection, loads_json, utc_now
 
 DEFAULT_DIRECTIONAL_ITEMS = [
-    {"name": "低错", "enabled": True},
+    {"name": "漏译", "enabled": True},
     {"name": "大小写问题", "enabled": True},
     {"name": "理解错误、错译", "enabled": True},
     {"name": "标点符号错误", "enabled": True},
 ]
 
+MOJIBAKE_MARKERS = ("?", "浣", "璇", "鐢", "閫", "瀹", "妯", "绫", "锛")
+
+
+def _looks_mojibake(text: str) -> bool:
+    return any(marker in text for marker in MOJIBAKE_MARKERS)
+
 
 def ensure_default_directional_template() -> None:
     with get_connection() as conn:
-        row = conn.execute("SELECT id FROM directional_templates WHERE is_default = 1 LIMIT 1").fetchone()
+        row = conn.execute("SELECT id, name, items_json FROM directional_templates WHERE is_default = 1 LIMIT 1").fetchone()
         if row:
+            name = str(row["name"] or "")
+            items = loads_json(row["items_json"], [])
+            if _looks_mojibake(name) or _looks_mojibake(dumps_json(items)):
+                conn.execute(
+                    """
+                    UPDATE directional_templates
+                    SET name = ?, items_json = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    ("通用定向审校", dumps_json(DEFAULT_DIRECTIONAL_ITEMS), utc_now(), row["id"]),
+                )
             return
         now = utc_now()
         conn.execute(
