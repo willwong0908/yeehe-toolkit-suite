@@ -101,7 +101,8 @@
       "enable_thinking": false
     },
     "ai_review_stage_settings": {
-      "enable_thinking": false
+      "enable_thinking": false,
+      "batch_request_char_limit": 3000
     }
   },
   "provider_name": "DeepSeek",

@@ -201,6 +201,7 @@ def build_default_settings() -> AppSettings:
                 "enable_thinking": False,
             },
             "ai_review_stage_settings": {
+                "batch_request_char_limit": 3000,
                 "enable_thinking": False,
             },
             "term_stage_settings": {

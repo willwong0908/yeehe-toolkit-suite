@@ -216,6 +216,7 @@ class SettingsPayload(BaseModel):
     term_recall_batch_char_limit: Optional[int] = None
     term_review_batch_char_limit: Optional[int] = None
     term_review_max_context_chars: Optional[int] = None
+    ai_review_batch_char_limit: Optional[int] = None
     nontrans_enable_thinking: Optional[bool] = None
     term_recall_enable_thinking: Optional[bool] = None
     term_review_enable_thinking: Optional[bool] = None
@@ -1029,6 +1030,8 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
         settings.input_defaults["term_review_stage_settings"] = review
 
         ai_review = dict(settings.input_defaults.get("ai_review_stage_settings", {}) or {})
+        if payload.ai_review_batch_char_limit is not None:
+            ai_review["batch_request_char_limit"] = int(payload.ai_review_batch_char_limit)
         if payload.ai_review_enable_thinking is not None:
             ai_review["enable_thinking"] = bool(payload.ai_review_enable_thinking)
         settings.input_defaults["ai_review_stage_settings"] = ai_review
@@ -2460,6 +2463,7 @@ INDEX_HTML = """<!doctype html>
             <div class="grid two">
               <label>提示词模板<select id="promptTemplateSelect"></select></label>
               <label id="directionalTemplatePanel" class="hidden">定向审校模板<select id="directionalTemplateSelect"></select></label>
+              <label>单次请求字符上限<input id="reviewAiLimit" type="number" min="200" value="3000" /></label>
             </div>
             <div class="actions">
               <button id="editPromptButton" class="secondary" type="button">编辑提示词</button>
@@ -4959,6 +4963,9 @@ async function loadSettings() {
   if ($("reviewAiThinking")) {
     $("reviewAiThinking").checked = Boolean(aiReview.enable_thinking);
   }
+  if ($("reviewAiLimit")) {
+    $("reviewAiLimit").value = aiReview.batch_request_char_limit || 3000;
+  }
   $("builtinRegex").checked = nontrans.builtin_regex_enabled !== false;
   $("aiDiscovery").checked = nontrans.ai_discovery_enabled !== false;
   $("aiRegex").checked = nontrans.ai_regex_generation_enabled !== false;
@@ -5032,8 +5039,15 @@ async function saveSettings() {
 
 function reviewSettingsPayload() {
   return {
+    ai_review_batch_char_limit: Number($("reviewAiLimit").value || 3000),
     ai_review_enable_thinking: $("reviewAiThinking").checked,
   };
+}
+
+async function saveReviewSettings() {
+  await api("/api/settings", { method: "POST", body: JSON.stringify(reviewSettingsPayload()) });
+  $("reviewSettingsHint").textContent = "审校设置已保存";
+  setTimeout(() => ($("reviewSettingsHint").textContent = ""), 1800);
 }
 
 function renderPromptTemplates() {
@@ -6035,6 +6049,12 @@ $("openReviewSettingsButton").addEventListener("click", () => setPage("aiReviewS
 $("openReviewForbiddenButton").addEventListener("click", () => setPage("aiReviewForbiddenPage"));
 $("enableAiReview").addEventListener("change", updateAiReviewModeVisibility);
 $("enableDirectionalReview").addEventListener("change", updateAiReviewModeVisibility);
+$("reviewAiThinking").addEventListener("change", () => saveReviewSettings().catch((error) => {
+  $("reviewSettingsHint").textContent = error.message;
+}));
+$("reviewAiLimit").addEventListener("change", () => saveReviewSettings().catch((error) => {
+  $("reviewSettingsHint").textContent = error.message;
+}));
 $("editPromptButton").addEventListener("click", () => openAiReviewPromptDialog().catch((error) => {
   $("reviewSettingsHint").textContent = error.message;
 }));

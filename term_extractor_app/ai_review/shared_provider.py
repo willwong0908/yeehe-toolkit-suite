@@ -34,7 +34,7 @@ def get_shared_ai_settings() -> dict[str, Any]:
         "selected_model": provider.model,
         "models": [],
         "max_concurrency": int(provider.max_concurrency or 6),
-        "max_chars_per_request": 3000,
+        "max_chars_per_request": int(ai_review_stage.get("batch_request_char_limit") or 3000),
         "enable_thinking": bool(ai_review_stage.get("enable_thinking", False)),
         "disable_system_proxy": bool(provider.disable_system_proxy),
         "timeout_seconds": int(provider.timeout_seconds or 90),
