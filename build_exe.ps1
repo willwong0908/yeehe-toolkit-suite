@@ -22,6 +22,6 @@ Get-ChildItem -Path (Join-Path $distDir "Yeehe_Toolkit_Suite") -Force | ForEach-
 }
 
 Copy-Item -LiteralPath ".\\start_webui.bat" -Destination $releaseDir -Force
-Copy-Item -LiteralPath ".\\stop_webui.bat" -Destination $releaseDir -Force
+Copy-Item -LiteralPath ".\\logo.png" -Destination $releaseDir -Force
 
 Write-Host "Build completed."
