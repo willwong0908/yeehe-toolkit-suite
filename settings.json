@@ -3,7 +3,7 @@
   "input_defaults": {
     "folder_path": "",
     "header_name": "",
-    "source_language": "cn",
+    "source_language": "中文",
     "export_review_sheet": false,
     "ascii_filter_blacklist": [
       "playername",
@@ -27,9 +27,9 @@
       "Exergy"
     ],
     "recall_scopes": [],
-    "extraction_mode": "nontrans_only",
+    "extraction_mode": "terms",
     "enable_nontrans_extraction": true,
-    "enable_term_extraction": false,
+    "enable_term_extraction": true,
     "nontrans_placeholder_format": "<{n}>",
     "numeric_normalization_enabled": true,
     "numeric_normalization_mode": "duplicate_group_only",
@@ -95,22 +95,22 @@
       "max_context_chars": 220,
       "enable_thinking": false
     },
+    "ai_review_stage_settings": {
+      "batch_request_char_limit": 3000,
+      "enable_thinking": false
+    },
     "term_stage_settings": {
       "single_item_char_limit": 500,
       "batch_request_char_limit": 3000,
       "enable_thinking": false
-    },
-    "ai_review_stage_settings": {
-      "enable_thinking": false,
-      "batch_request_char_limit": 3000
     }
   },
   "provider_name": "DeepSeek",
   "provider_settings": {
     "DeepSeek": {
-      "api_key": "sk-321f942ea34c4b2ebd9047e1d193476d",
+      "api_key": "",
       "base_url": "https://api.deepseek.com/v1",
-      "model": "deepseek-v4-flash",
+      "model": "deepseek-chat",
       "timeout_seconds": 90,
       "max_concurrency": 6,
       "extra_headers": {},

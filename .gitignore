@@ -11,6 +11,7 @@ dist_clean/
 output/
 program/
 release_bundle/
+Yeehe_Toolkit_*/
 AI_Term_Extractor_WebUI_Release/
 qa_nontrans_escape/
 

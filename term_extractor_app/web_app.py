@@ -1934,18 +1934,10 @@ INDEX_HTML = """<!doctype html>
 
       <section id="toolGuidePage" class="page-section active">
         <div class="tool-guide-grid">
-          <button class="tool-guide-card active" type="button" data-tool-guide="textPreprocess">文本预处理工具</button>
+          <button class="tool-guide-card" type="button" data-tool-guide="textPreprocess">文本预处理工具</button>
           <button class="tool-guide-card" type="button" data-tool-guide="aiReview">AI 审校工具</button>
           <button class="tool-guide-card" type="button" data-tool-guide="crossExcel">跨Excel搜索与合并</button>
-          <button class="tool-guide-card" type="button" data-tool-guide="diffTool">Diff 工具</button>
         </div>
-        <section class="card tool-guide-detail">
-          <div class="card-title">
-            <h3 id="toolGuideTitle">文本预处理工具</h3>
-            <p id="toolGuidePurpose">提取术语、识别非译元素，并整理成可交付的结果表。</p>
-          </div>
-          <div class="guide-steps" id="toolGuideSteps"></div>
-        </section>
       </section>
 
       <section id="overviewPage" class="page-section">
@@ -2579,6 +2571,19 @@ INDEX_HTML = """<!doctype html>
     </form>
   </dialog>
 
+  <dialog id="toolGuideDialog" class="dialog tool-guide-dialog">
+    <div class="dialog-card">
+      <header class="dialog-header">
+        <div>
+          <span class="dialog-kicker">工具说明</span>
+          <h3 id="toolGuideDialogTitle">工具说明</h3>
+        </div>
+        <button id="closeToolGuideDialogButton" class="icon-button" type="button" aria-label="关闭">×</button>
+      </header>
+      <article id="toolGuideDialogBody" class="markdown-guide"></article>
+    </div>
+  </dialog>
+
   <dialog id="directionalDialog" class="dialog">
     <form method="dialog" class="dialog-body">
       <div class="dialog-head">
@@ -2930,59 +2935,98 @@ body {
 .page-section.active { display: block; }
 .tool-guide-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
   margin-bottom: 18px;
 }
 .tool-guide-card {
-  min-height: 118px;
-  justify-content: flex-start;
-  align-items: flex-end;
-  padding: 22px;
-  border-radius: 24px;
+  min-height: 86px;
+  justify-content: center;
+  align-items: center;
+  padding: 16px;
+  border-radius: 18px;
   background: linear-gradient(145deg, rgba(255,255,255,.94), rgba(231,241,238,.88));
   border: 1px solid rgba(204, 220, 216, .95);
-  box-shadow: var(--shadow);
+  box-shadow: 0 14px 34px rgba(22, 32, 51, 0.08);
   color: #16263c;
-  font-size: 22px;
+  font-size: 17px;
   font-weight: 900;
-  text-align: left;
+  text-align: center;
   letter-spacing: -0.02em;
 }
 .tool-guide-card:hover,
-.tool-guide-card.active {
+.tool-guide-card:focus-visible {
   background: linear-gradient(145deg, #e7f5f1, #d7eae4);
   color: var(--primary-strong);
   transform: translateY(-2px);
 }
-.tool-guide-detail { min-height: 220px; }
-.guide-steps {
-  display: grid;
-  gap: 12px;
-  margin-top: 14px;
+.tool-guide-dialog {
+  width: min(760px, calc(100vw - 40px));
+  max-height: calc(100vh - 56px);
 }
-.guide-step {
+.tool-guide-dialog .dialog-card {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  gap: 12px;
+  gap: 18px;
+  max-height: calc(100vh - 56px);
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: #ffffff;
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.24);
+}
+.tool-guide-dialog .dialog-header {
+  display: flex;
+  justify-content: space-between;
   align-items: start;
-  padding: 14px;
-  border-radius: 16px;
-  background: #f5f9fb;
-  border: 1px solid #dce8f0;
+  gap: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #e4edf5;
 }
-.guide-step span {
-  display: inline-grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 999px;
-  background: var(--primary);
-  color: #fff;
+.tool-guide-dialog .dialog-header h3 {
+  margin: 0;
+  font-size: 28px;
+  letter-spacing: -0.03em;
+}
+.dialog-kicker {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--primary);
+  font-size: 12px;
   font-weight: 900;
+  letter-spacing: .1em;
+  text-transform: uppercase;
 }
-.guide-step strong { display: block; margin-bottom: 4px; }
-.guide-step p { margin: 0; color: var(--muted); line-height: 1.65; }
+.markdown-guide {
+  display: grid;
+  gap: 18px;
+  color: #24364d;
+}
+.markdown-guide h4 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+.markdown-guide p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.75;
+}
+.markdown-guide ul,
+.markdown-guide ol {
+  margin: 0;
+  padding-left: 22px;
+  color: #334b62;
+  line-height: 1.75;
+}
+.markdown-guide li + li { margin-top: 4px; }
+.markdown-guide code {
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: #eef5f4;
+  color: var(--primary-strong);
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 12px;
+}
 .section-header { margin: 0 0 16px; }
 .section-header h2 { margin: 0; font-size: 26px; }
 .section-header p { margin: 6px 0 0; color: var(--muted); }
@@ -3843,38 +3887,29 @@ const PAGE_ACCORDION_KEYS = {
 const TOOL_GUIDES = {
   textPreprocess: {
     title: "文本预处理工具",
-    purpose: "提取术语、识别非译元素，并整理成可交付的结果表。",
-    steps: [
-      ["准备文件", "选择包含 Excel 或 XLIFF 的目录，确认需要处理的文本列。"],
-      ["设置模型", "在模型设置中加载 DeepSeek 模型，按需要调整各阶段字符上限。"],
-      ["开始提取", "运行后工具会先保护非译元素，再提取术语并导出结果。"],
+    sections: [
+      ["用途", "从游戏文本表中提取术语，识别不应翻译的标签、变量、占位符等非译元素，并导出整理好的结果表。"],
+      ["适合处理", ["Excel 文本表", "XLIFF 文件", "带有 HTML 标签、花括号、变量、格式代码的游戏文本"]],
+      ["基本用法", ["在“模型设置”中加载模型。", "进入“文本预处理工具”，选择输入目录和待提取列。", "选择运行模式，点击“开始提取”。", "完成后在“结果”页打开输出文件。"]],
+      ["输出结果", ["术语库", "非译元素正则规则", "失败记录和任务日志"]],
     ],
   },
   aiReview: {
     title: "AI 审校工具",
-    purpose: "检查译文问题，支持普通审校、定向审校和禁用词检查。",
-    steps: [
-      ["导入文件", "选择 Excel 或 XLIFF，Excel 需要先确认原文列和译文列。"],
-      ["选择方式", "在审校设置中选择普通审校或定向审校，必要时开启深度思考。"],
-      ["查看结果", "开始审校后查看进度、日志和结果表，可打开输出文件。"],
+    sections: [
+      ["用途", "检查译文相对原文是否存在问题，适合做翻译质检、定向问题检查和禁用词检查。"],
+      ["适合处理", ["Excel 双语表", "XLIFF 文件", "需要按问题类型输出审校结果的项目"]],
+      ["基本用法", ["进入“AI 审校工具”，导入待审校文件。", "Excel 文件需要先确认原文列和译文列；XLIFF 会自动读取。", "在“审校设置”中选择普通审校或定向审校。", "点击“开始审校”，完成后打开结果文件。"]],
+      ["常用设置", ["单次请求字符上限：控制每次发给模型的文本长度。", "深度思考：用于更复杂的审校，但会更慢。", "禁用词：单独检查译文中是否出现指定词。"]],
     ],
   },
   crossExcel: {
     title: "跨Excel搜索与合并",
-    purpose: "在多个 Excel 中搜索内容，也可以按表头把多个表合并到一起。",
-    steps: [
-      ["选择目录", "选择需要搜索或合并的 Excel 文件所在目录。"],
-      ["搜索内容", "输入关键词后查看命中的整行内容，点击单元格可复制。"],
-      ["合并文件", "选择要保留的表头列，确认后输出合并结果。"],
-    ],
-  },
-  diffTool: {
-    title: "Diff 工具",
-    purpose: "预留用于对比文本或表格差异，帮助检查修改前后的变化。",
-    steps: [
-      ["功能预留", "该工具还未开放。"],
-      ["后续用途", "之后会用于对比文件差异、定位改动和辅助验收。"],
-      ["当前建议", "如果需要对比结果，先使用其他外部 Diff 工具。"],
+    sections: [
+      ["用途", "在多个 Excel 文件里快速搜索文本，或把多个 Excel 按相同表头合并成一个结果文件。"],
+      ["适合处理", ["多个结构相近的 Excel", "需要全局查找某个词或句子的项目", "需要按表头抽取并合并列的项目"]],
+      ["搜索用法", ["选择 Excel 所在目录。", "输入关键词后点击“搜索”。", "结果会按整行显示，点击单元格可以复制内容。"]],
+      ["合并用法", ["选择要合并的表头列。", "点击“合并”。", "完成后打开输出文件或输出目录。"]],
     ],
   },
 };
@@ -3940,20 +3975,14 @@ function renderCurrentTaskStatus() {
 
 function renderToolGuide(toolKey = "textPreprocess") {
   const guide = TOOL_GUIDES[toolKey] || TOOL_GUIDES.textPreprocess;
-  $("toolGuideTitle").textContent = guide.title;
-  $("toolGuidePurpose").textContent = guide.purpose;
-  $("toolGuideSteps").innerHTML = guide.steps.map((step, index) => `
-    <div class="guide-step">
-      <span>${index + 1}</span>
-      <div>
-        <strong>${escapeHtml(step[0])}</strong>
-        <p>${escapeHtml(step[1])}</p>
-      </div>
-    </div>
-  `).join("");
-  document.querySelectorAll(".tool-guide-card").forEach((card) => {
-    card.classList.toggle("active", card.dataset.toolGuide === toolKey);
-  });
+  $("toolGuideDialogTitle").textContent = guide.title;
+  $("toolGuideDialogBody").innerHTML = guide.sections.map(([heading, content]) => {
+    const body = Array.isArray(content)
+      ? `<ul>${content.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+      : `<p>${escapeHtml(content)}</p>`;
+    return `<section><h4>${escapeHtml(heading)}</h4>${body}</section>`;
+  }).join("");
+  $("toolGuideDialog").showModal();
 }
 
 function renderTaskStatus(taskLabel, pillText, pillClass, stageLabel, message) {
@@ -6177,6 +6206,7 @@ $("startReviewButton").addEventListener("click", () => startAiReviewTask().catch
 }));
 $("openReviewSettingsButton").addEventListener("click", () => setPage("aiReviewSettingsPage"));
 $("openReviewForbiddenButton").addEventListener("click", () => setPage("aiReviewForbiddenPage"));
+$("closeToolGuideDialogButton").addEventListener("click", () => $("toolGuideDialog").close());
 $("enableAiReview").addEventListener("change", updateAiReviewModeVisibility);
 $("enableDirectionalReview").addEventListener("change", updateAiReviewModeVisibility);
 $("reviewAiThinking").addEventListener("change", () => saveReviewSettings().catch((error) => {
@@ -6288,7 +6318,6 @@ document.querySelectorAll(".subnav-link").forEach((button) => {
 });
 
 setPage("toolGuidePage");
-renderToolGuide();
 renderCrossExcelHeaders([]);
 renderCrossExcelSearchResults(null);
 setCrossExcelOutput("");
