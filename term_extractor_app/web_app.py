@@ -223,6 +223,7 @@ class SettingsPayload(BaseModel):
     nontrans_enable_thinking: Optional[bool] = None
     term_recall_enable_thinking: Optional[bool] = None
     term_review_enable_thinking: Optional[bool] = None
+    ai_review_enable_thinking: Optional[bool] = None
     builtin_regex_enabled: Optional[bool] = None
     ai_discovery_enabled: Optional[bool] = None
     ai_regex_generation_enabled: Optional[bool] = None
@@ -926,6 +927,7 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
             "nontrans_stage_settings": nontrans,
             "term_recall_stage_settings": recall,
             "term_review_stage_settings": review,
+            "ai_review_stage_settings": dict(settings.input_defaults.get("ai_review_stage_settings", {}) or {}),
             "providers": list(settings.provider_settings.keys()),
             "pending_nontrans_rules": pending_nontrans_rules_response(settings),
         }
@@ -992,6 +994,11 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
         if payload.term_review_enable_thinking is not None:
             review["enable_thinking"] = bool(payload.term_review_enable_thinking)
         settings.input_defaults["term_review_stage_settings"] = review
+
+        ai_review = dict(settings.input_defaults.get("ai_review_stage_settings", {}) or {})
+        if payload.ai_review_enable_thinking is not None:
+            ai_review["enable_thinking"] = bool(payload.ai_review_enable_thinking)
+        settings.input_defaults["ai_review_stage_settings"] = ai_review
 
         task_facade.save_settings(settings)
         return {"ok": True}
@@ -1822,7 +1829,9 @@ INDEX_HTML = """<!doctype html>
             <span class="nav-group-title">AI 审校工具</span>
           </summary>
           <div class="nav-submenu">
-            <button class="nav-link nav-link-sub" data-page-target="aiReviewPage">审校任务</button>
+            <button class="nav-link nav-link-sub" data-page-target="aiReviewTaskPage">审校任务</button>
+            <button class="nav-link nav-link-sub" data-page-target="aiReviewSettingsPage">审校设置</button>
+            <button class="nav-link nav-link-sub" data-page-target="aiReviewForbiddenPage">禁用词</button>
           </div>
         </details>
 
@@ -2267,7 +2276,7 @@ INDEX_HTML = """<!doctype html>
         </div>
       </section>
 
-      <section id="aiReviewPage" class="page-section">
+      <section id="aiReviewTaskPage" class="page-section">
         <div class="grid dashboard-grid">
           <section class="card">
             <div class="card-title">
@@ -2306,36 +2315,6 @@ INDEX_HTML = """<!doctype html>
               <button id="clearReviewCacheButton" class="secondary" type="button">清空缓存</button>
             </div>
           </section>
-
-          <section class="card">
-            <div class="card-title">
-              <h3>审校设置</h3>
-              <p>模型连接共用顶部模型设置；这里控制审校方式和模板。</p>
-            </div>
-            <div class="grid two">
-              <label>原文语种<input id="sourceLanguageInput" placeholder="例如 English" /></label>
-              <label>译文语种<input id="targetLanguageInput" placeholder="例如 简体中文" /></label>
-            </div>
-            <div class="actions review-toggle-row">
-              <label class="check-line"><input id="enableAiReview" type="checkbox" checked /><span>启用 AI 审校</span></label>
-              <label id="directionalReviewLine" class="check-line"><input id="enableDirectionalReview" type="checkbox" /><span>定向审校</span></label>
-              <label class="check-line"><input id="enableForbiddenCheck" type="checkbox" /><span>启用禁用词</span></label>
-            </div>
-            <div class="grid two">
-              <label>提示词模板<select id="promptTemplateSelect"></select></label>
-              <label id="directionalTemplatePanel" class="hidden">定向审校模板<select id="directionalTemplateSelect"></select></label>
-              <label id="forbiddenTemplatePanel" class="hidden">禁用词模板<select id="forbiddenTemplateSelect"></select></label>
-            </div>
-            <div class="actions">
-              <button id="openModelSettingsFromReviewButton" class="secondary" type="button">模型设置</button>
-              <button id="testReviewModelButton" class="secondary" type="button">测试模型</button>
-              <button id="editPromptButton" class="secondary" type="button">编辑提示词</button>
-              <button id="editDirectionalButton" class="secondary" type="button">编辑定向</button>
-              <button id="editForbiddenButton" class="secondary" type="button">编辑禁用词</button>
-              <button id="startReviewButton" class="primary" type="button">开始审校</button>
-            </div>
-            <span id="reviewTaskHint" class="hint"></span>
-          </section>
         </div>
 
         <div class="grid dashboard-grid">
@@ -2361,6 +2340,25 @@ INDEX_HTML = """<!doctype html>
                 </tbody>
               </table>
             </div>
+          </section>
+        </div>
+
+        <div class="grid dashboard-grid">
+          <section class="card">
+            <div class="card-title">
+              <h3>任务操作</h3>
+              <p>确认读取结果后，即可开始审校任务。</p>
+            </div>
+            <div class="grid two">
+              <label>原文语种<input id="sourceLanguageInput" placeholder="例如 English" /></label>
+              <label>译文语种<input id="targetLanguageInput" placeholder="例如 简体中文" /></label>
+            </div>
+            <div class="actions">
+              <button id="startReviewButton" class="primary" type="button">开始审校</button>
+              <button id="openReviewSettingsButton" class="secondary" type="button">打开审校设置</button>
+              <button id="openReviewForbiddenButton" class="secondary" type="button">打开禁用词</button>
+            </div>
+            <span id="reviewTaskHint" class="hint"></span>
           </section>
 
           <section class="card">
@@ -2405,6 +2403,69 @@ INDEX_HTML = """<!doctype html>
             </table>
           </div>
         </section>
+      </section>
+
+      <section id="aiReviewSettingsPage" class="page-section">
+        <div class="grid dashboard-grid">
+          <section class="card">
+            <div class="card-title">
+              <h3>审校方式</h3>
+              <p>这里只管理审校方式、模板与思考深度，不放任务读取内容。</p>
+            </div>
+            <div class="actions review-toggle-row">
+              <label class="check-line"><input id="enableAiReview" type="checkbox" checked /><span>启用 AI 审校</span></label>
+              <label id="directionalReviewLine" class="check-line"><input id="enableDirectionalReview" type="checkbox" /><span>启用定向审校</span></label>
+              <label class="check-line"><input id="reviewAiThinking" type="checkbox" /><span>深度思考</span></label>
+            </div>
+            <div class="grid two">
+              <label>提示词模板<select id="promptTemplateSelect"></select></label>
+              <label id="directionalTemplatePanel" class="hidden">定向审校模板<select id="directionalTemplateSelect"></select></label>
+            </div>
+            <div class="actions">
+              <button id="openModelSettingsFromReviewButton" class="secondary" type="button">模型设置</button>
+              <button id="testReviewModelButton" class="secondary" type="button">测试模型</button>
+              <button id="saveReviewSettingsButton" class="secondary" type="button">保存设置</button>
+            </div>
+            <span id="reviewSettingsHint" class="hint"></span>
+          </section>
+
+          <section class="card">
+            <div class="card-title">
+              <h3>模板管理</h3>
+              <p>普通审校和定向审校的模板都在这里维护。</p>
+            </div>
+            <div class="actions">
+              <button id="editPromptButton" class="secondary" type="button">编辑提示词</button>
+              <button id="editDirectionalButton" class="secondary" type="button">编辑定向</button>
+            </div>
+            <div class="notice-list">
+              <div>启用定向审校后，会按定向模板中的项目输出结果列。</div>
+              <div>模型连接仍共用顶部的模型设置。</div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="aiReviewForbiddenPage" class="page-section">
+        <div class="grid dashboard-grid">
+          <section class="card">
+            <div class="card-title">
+              <h3>禁用词开关</h3>
+              <p>禁用词会在译文中直接检查命中内容，可与 AI 审校一起使用。</p>
+            </div>
+            <div class="actions review-toggle-row">
+              <label class="check-line"><input id="enableForbiddenCheck" type="checkbox" /><span>启用禁用词</span></label>
+            </div>
+            <div class="grid one">
+              <label id="forbiddenTemplatePanel">禁用词模板<select id="forbiddenTemplateSelect"></select></label>
+            </div>
+            <div class="actions">
+              <button id="editForbiddenButton" class="secondary" type="button">编辑禁用词</button>
+              <button id="saveForbiddenSettingsButton" class="secondary" type="button">保存设置</button>
+            </div>
+            <span id="reviewForbiddenHint" class="hint"></span>
+          </section>
+        </div>
       </section>
 
     </main>
@@ -3336,6 +3397,13 @@ let crossExcelScanState = null;
 let crossExcelSearchState = null;
 let crossExcelOutputFile = "";
 let currentPageId = "overviewPage";
+let aiReviewBatch = null;
+let aiReviewTaskId = "";
+let aiReviewLogCursor = 0;
+let aiReviewTaskPoller = null;
+let aiReviewPromptTemplates = [];
+let aiReviewDirectionalTemplates = [];
+let aiReviewForbiddenTemplates = [];
 const TASK_STATUS_BY_PAGE = {
   overviewPage: {
     taskLabel: "文本预处理工具",
@@ -3353,7 +3421,23 @@ const TASK_STATUS_BY_PAGE = {
     message: "等待开始任务",
     active: false,
   },
-  aiReviewPage: {
+  aiReviewTaskPage: {
+    taskLabel: "AI 审校工具",
+    pill: "空闲",
+    pillClass: "",
+    stageLabel: "未启动",
+    message: "等待开始任务",
+    active: false,
+  },
+  aiReviewSettingsPage: {
+    taskLabel: "AI 审校工具",
+    pill: "空闲",
+    pillClass: "",
+    stageLabel: "未启动",
+    message: "等待开始任务",
+    active: false,
+  },
+  aiReviewForbiddenPage: {
     taskLabel: "AI 审校工具",
     pill: "空闲",
     pillClass: "",
@@ -3371,7 +3455,9 @@ const PAGE_TASK_LABELS = {
   runDetailsPage: "文本预处理工具",
   resultsPage: "文本预处理工具",
   crossExcelPage: "跨Excel搜索与合并",
-  aiReviewPage: "AI 审校工具",
+  aiReviewTaskPage: "AI 审校工具",
+  aiReviewSettingsPage: "AI 审校工具",
+  aiReviewForbiddenPage: "AI 审校工具",
 };
 const PAGE_HERO_COPY = {
   overviewPage: { title: "文本预处理工具", lede: "用于提取术语、识别非译元素，并整理文本预处理结果。" },
@@ -3382,7 +3468,9 @@ const PAGE_HERO_COPY = {
   runDetailsPage: { title: "运行详情", lede: "查看任务过程、统计和日志。" },
   resultsPage: { title: "结果", lede: "在这里查看导出结果和数量概览。" },
   crossExcelPage: { title: "跨Excel搜索与合并", lede: "跨文件搜索整行内容，并按表头合并结果。" },
-  aiReviewPage: { title: "AI 审校工具", lede: "读取 Excel 或 XLIFF，执行普通审校、定向审校与禁用词检查。" },
+  aiReviewTaskPage: { title: "审校任务", lede: "导入文件、确认映射、查看预览并启动审校任务。" },
+  aiReviewSettingsPage: { title: "审校设置", lede: "管理 AI 审校方式、定向审校模板与深度思考。" },
+  aiReviewForbiddenPage: { title: "禁用词", lede: "单独管理禁用词开关与禁用词模板。" },
 };
 const PAGE_ACCORDION_KEYS = {
   overviewPage: "text-preprocess",
@@ -3392,7 +3480,9 @@ const PAGE_ACCORDION_KEYS = {
   runDetailsPage: "text-preprocess",
   resultsPage: "text-preprocess",
   crossExcelPage: "cross-excel-search",
-  aiReviewPage: "ai-review-tool",
+  aiReviewTaskPage: "ai-review-tool",
+  aiReviewSettingsPage: "ai-review-tool",
+  aiReviewForbiddenPage: "ai-review-tool",
 };
 
 function setPage(pageId) {
@@ -3662,6 +3752,516 @@ function renderCrossExcelSearchResults(data) {
   });
 }
 
+function renderAiReviewPreview(items) {
+  const body = $("previewBody");
+  body.innerHTML = "";
+  const rows = Array.isArray(items) ? items : [];
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="6" class="empty-cell">暂无预览</td></tr>';
+    return;
+  }
+  rows.forEach((item) => {
+    const tr = document.createElement("tr");
+    const location = String(item.sheet_name || item.segment_id || "");
+    const values = [
+      item.source_file || "",
+      location,
+      item.row_number || "",
+      item.source_text || "",
+      item.target_text || "",
+      item.status_note || "",
+    ];
+    values.forEach((value) => {
+      const td = document.createElement("td");
+      td.textContent = String(value || "");
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  });
+}
+
+function renderAiReviewColumnPanel(data) {
+  const panel = $("reviewColumnPanel");
+  const sourceSelect = $("sourceColumn");
+  const targetSelect = $("targetColumn");
+  const headers = Array.isArray(data?.headers) ? data.headers : [];
+  sourceSelect.innerHTML = "";
+  targetSelect.innerHTML = "";
+  headers.forEach((header) => {
+    sourceSelect.appendChild(new Option(String(header || ""), String(header || "")));
+    targetSelect.appendChild(new Option(String(header || ""), String(header || "")));
+  });
+  if (headers.length > 1) {
+    targetSelect.selectedIndex = 1;
+  }
+  panel.classList.toggle("hidden", !(data?.needs_column_selection && headers.length));
+}
+
+function renderAiReviewBatch(data) {
+  const batch = data?.batch || null;
+  aiReviewBatch = batch;
+  $("reviewBatchCount").textContent = Number(batch?.item_count || 0);
+  $("reviewFileHint").textContent = data?.message || "尚未读取文件。";
+  $("openReviewFileButton").disabled = !batch?.metadata?.original_file_path;
+  $("reviewFilePath").value = String(batch?.metadata?.original_file_path || "");
+  $("sourceLanguageInput").value = String(batch?.source_language || $("sourceLanguageInput").value || "");
+  $("targetLanguageInput").value = String(batch?.target_language || $("targetLanguageInput").value || "");
+  renderAiReviewPreview(data?.preview || []);
+}
+
+function setAiReviewTaskStatus(nextState = {}) {
+  const pages = ["aiReviewTaskPage", "aiReviewSettingsPage", "aiReviewForbiddenPage"];
+  pages.forEach((pageId) => {
+    setTaskStatus(pageId, {
+      taskLabel: "AI 审校工具",
+      ...nextState,
+    });
+  });
+  renderCurrentTaskStatus();
+}
+
+function updateAiReviewModeVisibility() {
+  const enableAi = $("enableAiReview").checked;
+  const enableDirectional = enableAi && $("enableDirectionalReview").checked;
+  $("enableDirectionalReview").disabled = !enableAi;
+  $("directionalReviewLine").classList.toggle("disabled-line", !enableAi);
+  $("directionalTemplatePanel").classList.toggle("hidden", !enableDirectional);
+  $("promptTemplateSelect").disabled = !enableAi || enableDirectional;
+  $("directionalTemplateSelect").disabled = !enableDirectional;
+}
+
+function renderAiReviewPromptTemplateOptions() {
+  const select = $("promptTemplateSelect");
+  select.innerHTML = "";
+  aiReviewPromptTemplates.forEach((item) => {
+    select.appendChild(new Option(String(item.name || ""), String(item.id || "")));
+  });
+}
+
+function renderAiReviewDirectionalTemplateOptions() {
+  const select = $("directionalTemplateSelect");
+  select.innerHTML = "";
+  aiReviewDirectionalTemplates.forEach((item) => {
+    select.appendChild(new Option(String(item.name || ""), String(item.id || "")));
+  });
+  updateAiReviewModeVisibility();
+}
+
+function renderAiReviewForbiddenTemplateOptions() {
+  const select = $("forbiddenTemplateSelect");
+  select.innerHTML = "";
+  aiReviewForbiddenTemplates.forEach((item) => {
+    select.appendChild(new Option(String(item.name || ""), String(item.id || "")));
+  });
+}
+
+function fillAiReviewPromptDialog(template = {}) {
+  $("promptTemplateId").value = String(template.id || "");
+  $("promptNameInput").value = String(template.name || "");
+  $("systemPromptInput").value = String(template.system_prompt || "");
+  $("userPromptInput").value = String(template.user_prompt || "");
+  $("deletePromptButton").disabled = Boolean(template.is_default) || !template.id;
+}
+
+async function openAiReviewPromptDialog() {
+  const templateId = $("promptTemplateSelect").value;
+  if (!templateId) {
+    return;
+  }
+  const data = await api(`/api/ai-review/prompt-templates/${encodeURIComponent(templateId)}`);
+  fillAiReviewPromptDialog(data.template || {});
+  $("promptDialog").showModal();
+}
+
+function newAiReviewPromptTemplate() {
+  fillAiReviewPromptDialog({
+    id: "",
+    name: "新建模板",
+    system_prompt: "",
+    user_prompt: "{text}",
+    is_default: false,
+  });
+}
+
+async function saveAiReviewPromptTemplate() {
+  const data = await api("/api/ai-review/prompt-templates", {
+    method: "POST",
+    body: JSON.stringify({
+      id: $("promptTemplateId").value || null,
+      name: $("promptNameInput").value || "未命名模板",
+      system_prompt: $("systemPromptInput").value,
+      user_prompt: $("userPromptInput").value,
+    }),
+  });
+  await loadAiReviewPromptTemplates();
+  $("promptTemplateSelect").value = String(data?.template?.id || "");
+  $("promptDialog").close();
+  $("reviewSettingsHint").textContent = data.message || "提示词模板已保存";
+}
+
+async function resetAiReviewPromptTemplate() {
+  const data = await api("/api/ai-review/prompt-templates/reset-default", {
+    method: "POST",
+    body: "{}",
+  });
+  await loadAiReviewPromptTemplates();
+  $("promptTemplateSelect").value = String(data?.template?.id || $("promptTemplateSelect").value || "");
+  fillAiReviewPromptDialog(data.template || {});
+}
+
+async function deleteAiReviewPromptTemplate() {
+  const templateId = $("promptTemplateId").value;
+  if (!templateId) {
+    return;
+  }
+  if (!window.confirm("确定删除这个提示词模板吗？")) {
+    return;
+  }
+  await api(`/api/ai-review/prompt-templates/${encodeURIComponent(templateId)}`, {
+    method: "DELETE",
+  });
+  await loadAiReviewPromptTemplates();
+  $("promptDialog").close();
+}
+
+function renderDirectionalEditorItems(items) {
+  const container = $("directionalItems");
+  container.innerHTML = "";
+  const rows = Array.isArray(items) ? items : [];
+  rows.forEach((item) => {
+    const row = document.createElement("label");
+    row.className = "directional-item";
+    row.innerHTML = `
+      <input type="checkbox" ${item.enabled !== false ? "checked" : ""} />
+      <input type="text" value="${escapeHtml(String(item.name || ""))}" placeholder="输入审校项名称" />`;
+    container.appendChild(row);
+  });
+}
+
+function appendDirectionalEditorItem(name = "", enabled = true) {
+  const current = Array.from($("directionalItems").querySelectorAll(".directional-item")).map((row) => ({
+    enabled: row.querySelector('input[type="checkbox"]').checked,
+    name: row.querySelector('input[type="text"]').value,
+  }));
+  current.push({ name, enabled });
+  renderDirectionalEditorItems(current);
+}
+
+function fillDirectionalDialog(template = {}) {
+  $("directionalTemplateId").value = String(template.id || "");
+  $("directionalNameInput").value = String(template.name || "");
+  renderDirectionalEditorItems(template.items || []);
+}
+
+async function openDirectionalDialog() {
+  const templateId = $("directionalTemplateSelect").value;
+  if (!templateId) {
+    return;
+  }
+  const data = await api(`/api/ai-review/directional-templates/${encodeURIComponent(templateId)}`);
+  fillDirectionalDialog(data.template || {});
+  $("directionalDialog").showModal();
+}
+
+function newDirectionalTemplate() {
+  fillDirectionalDialog({
+    id: "",
+    name: "新建定向模板",
+    items: [{ name: "", enabled: true }],
+  });
+}
+
+async function saveDirectionalTemplateFromDialog() {
+  const items = Array.from($("directionalItems").querySelectorAll(".directional-item")).map((row) => ({
+    enabled: row.querySelector('input[type="checkbox"]').checked,
+    name: row.querySelector('input[type="text"]').value,
+  }));
+  const data = await api("/api/ai-review/directional-templates", {
+    method: "POST",
+    body: JSON.stringify({
+      id: $("directionalTemplateId").value || null,
+      name: $("directionalNameInput").value || "未命名定向模板",
+      items,
+    }),
+  });
+  await loadAiReviewDirectionalTemplates();
+  $("directionalTemplateSelect").value = String(data?.template?.id || "");
+  $("directionalDialog").close();
+  $("reviewSettingsHint").textContent = data.message || "定向模板已保存";
+}
+
+function fillForbiddenDialog(template = {}) {
+  $("forbiddenTemplateId").value = String(template.id || "");
+  $("forbiddenNameInput").value = String(template.name || "");
+  $("forbiddenWordsInput").value = String(template.words_text || "");
+}
+
+async function openForbiddenDialog() {
+  const templateId = $("forbiddenTemplateSelect").value;
+  if (!templateId) {
+    return;
+  }
+  const data = await api(`/api/ai-review/forbidden-templates/${encodeURIComponent(templateId)}`);
+  fillForbiddenDialog(data.template || {});
+  $("forbiddenDialog").showModal();
+}
+
+function newForbiddenTemplate() {
+  fillForbiddenDialog({
+    id: "",
+    name: "新建禁用词模板",
+    words_text: "",
+  });
+}
+
+async function saveForbiddenTemplateFromDialog() {
+  const data = await api("/api/ai-review/forbidden-templates", {
+    method: "POST",
+    body: JSON.stringify({
+      id: $("forbiddenTemplateId").value || null,
+      name: $("forbiddenNameInput").value || "未命名禁用词模板",
+      words_text: $("forbiddenWordsInput").value,
+    }),
+  });
+  await loadAiReviewForbiddenTemplates();
+  $("forbiddenTemplateSelect").value = String(data?.template?.id || "");
+  $("forbiddenDialog").close();
+  $("reviewForbiddenHint").textContent = data.message || "禁用词模板已保存";
+}
+
+function renderAiReviewResults(task, results) {
+  const outputFile = String(task?.output_file || "");
+  $("reviewProgress").textContent = String(task?.status_label || task?.status || "尚未开始");
+  $("outputPath").textContent = outputFile || "暂无输出";
+  $("outputPanel").classList.toggle("hidden", !outputFile);
+  $("openOutputFileButton").disabled = !outputFile;
+
+  const body = $("reviewResultBody");
+  body.innerHTML = "";
+  const items = Array.isArray(results) ? results : [];
+  if (!items.length) {
+    body.innerHTML = '<tr><td colspan="6" class="empty-cell">暂无审校结果</td></tr>';
+    return;
+  }
+  items.forEach((item) => {
+    const tr = document.createElement("tr");
+    const cells = [
+      item.source_text || "",
+      item.target_text || "",
+      item.has_issue ? "是" : "否",
+      item.issue_type || "",
+      item.issue || "",
+      item.suggestion || "",
+    ];
+    cells.forEach((value) => {
+      const td = document.createElement("td");
+      td.textContent = String(value || "");
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  });
+}
+
+function appendAiReviewLogs(logs) {
+  const list = $("reviewLogList");
+  const items = Array.isArray(logs) ? logs : [];
+  items.forEach((item) => {
+    aiReviewLogCursor = Math.max(aiReviewLogCursor, Number(item.id || 0));
+    const li = document.createElement("li");
+    li.textContent = `${String(item.created_at || "")} ${String(item.message || "")}`.trim();
+    if (String(item.level || "").toLowerCase() === "error") {
+      li.classList.add("error");
+    }
+    list.appendChild(li);
+  });
+}
+
+async function loadAiReviewPromptTemplates() {
+  const data = await api("/api/ai-review/prompt-templates");
+  aiReviewPromptTemplates = Array.isArray(data.templates) ? data.templates : [];
+  renderAiReviewPromptTemplateOptions();
+}
+
+async function loadAiReviewDirectionalTemplates() {
+  const data = await api("/api/ai-review/directional-templates");
+  aiReviewDirectionalTemplates = Array.isArray(data.templates) ? data.templates : [];
+  renderAiReviewDirectionalTemplateOptions();
+}
+
+async function loadAiReviewForbiddenTemplates() {
+  const data = await api("/api/ai-review/forbidden-templates");
+  aiReviewForbiddenTemplates = Array.isArray(data.templates) ? data.templates : [];
+  renderAiReviewForbiddenTemplateOptions();
+}
+
+async function chooseAiReviewFile() {
+  const data = await api("/api/dialog/select-review-file");
+  if (data.cancelled || !data.file_path) {
+    return;
+  }
+  $("reviewFilePath").value = data.file_path;
+  await loadAiReviewFile(data.file_path);
+}
+
+async function loadAiReviewFile(filePath) {
+  const data = await api("/api/ai-review/file/load", {
+    method: "POST",
+    body: JSON.stringify({ file_path: filePath }),
+  });
+  $("reviewFileHint").textContent = data.message || "读取完成";
+  renderAiReviewBatch(data);
+  renderAiReviewColumnPanel(data);
+}
+
+async function confirmAiReviewColumns() {
+  if (!aiReviewBatch?.id) {
+    throw new Error("请先读取文件");
+  }
+  const data = await api("/api/ai-review/select-columns", {
+    method: "POST",
+    body: JSON.stringify({
+      batch_id: aiReviewBatch.id,
+      source_column: $("sourceColumn").value,
+      target_column: $("targetColumn").value,
+    }),
+  });
+  renderAiReviewBatch(data);
+  $("reviewColumnPanel").classList.add("hidden");
+}
+
+async function useAiReviewCache() {
+  const data = await api("/api/ai-review/cache/use", {
+    method: "POST",
+    body: "{}",
+  });
+  renderAiReviewBatch(data);
+  renderAiReviewColumnPanel(data);
+}
+
+async function clearAiReviewCache() {
+  await api("/api/ai-review/cache/clear", {
+    method: "POST",
+    body: "{}",
+  });
+  aiReviewBatch = null;
+  $("reviewBatchCount").textContent = "0";
+  $("reviewFileHint").textContent = "读取缓存已清空";
+  $("reviewFilePath").value = "";
+  $("reviewColumnPanel").classList.add("hidden");
+  renderAiReviewPreview([]);
+}
+
+async function openAiReviewFile() {
+  const filePath = String(aiReviewBatch?.metadata?.original_file_path || "");
+  if (!filePath) {
+    return;
+  }
+  await api("/api/ai-review/file/open", {
+    method: "POST",
+    body: JSON.stringify({ file_path: filePath }),
+  });
+}
+
+async function testAiReviewModel() {
+  const data = await api("/api/ai-review/ai/test", {
+    method: "POST",
+    body: "{}",
+  });
+  $("reviewSettingsHint").textContent = `${data.message}：${data.model || ""}`;
+}
+
+async function startAiReviewTask() {
+  if (!aiReviewBatch?.id) {
+    $("reviewTaskHint").textContent = "请先读取文件";
+    return;
+  }
+  await saveAiReviewSettings("reviewTaskHint", "正在保存审校设置...");
+  const mode = $("enableAiReview").checked
+    ? ($("enableDirectionalReview").checked ? "directional" : "normal")
+    : "normal";
+  const data = await api("/api/ai-review/start", {
+    method: "POST",
+    body: JSON.stringify({
+      batch_id: aiReviewBatch.id,
+      prompt_template_id: $("promptTemplateSelect").value || null,
+      source_language: $("sourceLanguageInput").value || "",
+      target_language: $("targetLanguageInput").value || "",
+      mode,
+      directional_template_id: $("directionalTemplateSelect").value || null,
+      enable_ai_review: $("enableAiReview").checked,
+      enable_forbidden_check: $("enableForbiddenCheck").checked,
+      forbidden_template_id: $("forbiddenTemplateSelect").value || null,
+    }),
+  });
+  aiReviewTaskId = String(data?.task?.id || "");
+  aiReviewLogCursor = 0;
+  $("reviewLogList").innerHTML = "";
+  $("reviewTaskHint").textContent = data.message || "审校任务已启动";
+  setAiReviewTaskStatus({
+    active: true,
+    pill: "运行中",
+    pillClass: "running",
+    stageLabel: "审校中",
+    message: "正在执行 AI 审校",
+  });
+  await pollAiReviewTask();
+  if (aiReviewTaskPoller) {
+    window.clearInterval(aiReviewTaskPoller);
+  }
+  aiReviewTaskPoller = window.setInterval(pollAiReviewTask, 1500);
+}
+
+async function pollAiReviewTask() {
+  if (!aiReviewTaskId) {
+    return;
+  }
+  const data = await api(`/api/ai-review/tasks/${encodeURIComponent(aiReviewTaskId)}`);
+  renderAiReviewResults(data.task || {}, data.results || []);
+  const task = data.task || {};
+  const status = String(task.status || "");
+  const done = status === "completed" || status === "failed";
+  setAiReviewTaskStatus({
+    active: !done,
+    pill: status === "failed" ? "失败" : done ? "空闲" : "运行中",
+    pillClass: status === "failed" ? "failed" : done ? "" : "running",
+    stageLabel: String(task.status_label || task.status || "审校中"),
+    message: String(task.message || task.status_label || "正在执行 AI 审校"),
+  });
+  const logs = await api(`/api/ai-review/tasks/${encodeURIComponent(aiReviewTaskId)}/logs?after_id=${aiReviewLogCursor}`);
+  appendAiReviewLogs(logs.logs || []);
+  if (done && aiReviewTaskPoller) {
+    window.clearInterval(aiReviewTaskPoller);
+    aiReviewTaskPoller = null;
+  }
+}
+
+async function openAiReviewOutputDir() {
+  await api("/api/ai-review/outputs/open-folder", {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+async function openAiReviewOutputFile() {
+  const filePath = $("outputPath").textContent.trim();
+  if (!filePath || filePath === "暂无输出") {
+    return;
+  }
+  await api("/api/ai-review/outputs/open-file", {
+    method: "POST",
+    body: JSON.stringify({ file_path: filePath }),
+  });
+}
+
+async function loadLatestAiReviewCache() {
+  const data = await api("/api/ai-review/cache/latest");
+  if (!data.has_cache) {
+    return;
+  }
+  renderAiReviewBatch(data);
+  renderAiReviewColumnPanel(data);
+}
+
 function setCrossExcelOutput(filePath, message = "") {
   crossExcelOutputFile = String(filePath || "").trim();
   $("crossExcelOutputFile").textContent = crossExcelOutputFile || "暂无输出";
@@ -3702,6 +4302,7 @@ async function loadSettings() {
   const nontrans = data.nontrans_stage_settings || {};
   const recall = data.term_recall_stage_settings || {};
   const review = data.term_review_stage_settings || {};
+  const aiReview = data.ai_review_stage_settings || {};
   $("nontransLimit").value = nontrans.chunk_char_limit || 3000;
   $("recallLimit").value = recall.batch_request_char_limit || 3000;
   $("reviewLimit").value = review.batch_request_char_limit || 3000;
@@ -3709,6 +4310,9 @@ async function loadSettings() {
   $("nontransThinking").checked = Boolean(nontrans.enable_thinking);
   $("recallThinking").checked = Boolean(recall.enable_thinking);
   $("reviewThinking").checked = Boolean(review.enable_thinking);
+  if ($("reviewAiThinking")) {
+    $("reviewAiThinking").checked = Boolean(aiReview.enable_thinking);
+  }
   $("builtinRegex").checked = nontrans.builtin_regex_enabled !== false;
   $("aiDiscovery").checked = nontrans.ai_discovery_enabled !== false;
   $("aiRegex").checked = nontrans.ai_regex_generation_enabled !== false;
@@ -3778,6 +4382,12 @@ async function saveSettings() {
   await api("/api/settings", { method: "POST", body: JSON.stringify(settingsPayload()) });
   $("saveHint").textContent = "设置已保存";
   setTimeout(() => ($("saveHint").textContent = ""), 1800);
+}
+
+function reviewSettingsPayload() {
+  return {
+    ai_review_enable_thinking: $("reviewAiThinking").checked,
+  };
 }
 
 function renderPromptTemplates() {
@@ -3880,6 +4490,19 @@ async function resetSinglePromptTemplate(key) {
   $("promptTemplateHint").textContent = "该提示词已恢复默认";
   setTimeout(() => ($("promptTemplateHint").textContent = ""), 1800);
   renderPromptTemplates();
+}
+
+async function saveAiReviewSettings(hintId = "reviewSettingsHint", message = "审校设置已保存") {
+  await api("/api/settings", { method: "POST", body: JSON.stringify(reviewSettingsPayload()) });
+  const hint = $(hintId);
+  if (hint) {
+    hint.textContent = message;
+    setTimeout(() => {
+      if (hint.textContent === message) {
+        hint.textContent = "";
+      }
+    }, 1800);
+  }
 }
 
 function renderAsciiPatterns() {
@@ -4750,6 +5373,91 @@ $("searchCrossExcelButton").addEventListener("click", searchCrossExcel);
 $("mergeCrossExcelButton").addEventListener("click", mergeCrossExcel);
 $("selectAllCrossHeadersButton").addEventListener("click", () => setCrossExcelHeaderSelection(true));
 $("clearCrossHeadersButton").addEventListener("click", () => setCrossExcelHeaderSelection(false));
+$("chooseReviewFileButton").addEventListener("click", () => chooseAiReviewFile().catch((error) => {
+  $("reviewTaskHint").textContent = error.message;
+}));
+$("confirmColumnsButton").addEventListener("click", () => confirmAiReviewColumns().catch((error) => {
+  $("reviewTaskHint").textContent = error.message;
+}));
+$("useReviewCacheButton").addEventListener("click", () => useAiReviewCache().catch((error) => {
+  $("reviewTaskHint").textContent = error.message;
+}));
+$("clearReviewCacheButton").addEventListener("click", () => clearAiReviewCache().catch((error) => {
+  $("reviewTaskHint").textContent = error.message;
+}));
+$("openReviewFileButton").addEventListener("click", () => openAiReviewFile().catch((error) => {
+  $("reviewTaskHint").textContent = error.message;
+}));
+$("startReviewButton").addEventListener("click", () => startAiReviewTask().catch((error) => {
+  $("reviewTaskHint").textContent = error.message;
+  setAiReviewTaskStatus({
+    active: false,
+    pill: "失败",
+    pillClass: "failed",
+    stageLabel: "审校失败",
+    message: error.message,
+  });
+}));
+$("openReviewSettingsButton").addEventListener("click", () => setPage("aiReviewSettingsPage"));
+$("openReviewForbiddenButton").addEventListener("click", () => setPage("aiReviewForbiddenPage"));
+$("saveReviewSettingsButton").addEventListener("click", () => saveAiReviewSettings().catch((error) => {
+  $("reviewSettingsHint").textContent = error.message;
+}));
+$("saveForbiddenSettingsButton").addEventListener("click", () => {
+  const hint = $("reviewForbiddenHint");
+  hint.textContent = "禁用词设置会在开始审校时自动使用当前选择。";
+  setTimeout(() => {
+    if (hint.textContent === "禁用词设置会在开始审校时自动使用当前选择。") {
+      hint.textContent = "";
+    }
+  }, 1800);
+});
+$("testReviewModelButton").addEventListener("click", () => testAiReviewModel().catch((error) => {
+  $("reviewSettingsHint").textContent = error.message;
+}));
+$("openModelSettingsFromReviewButton").addEventListener("click", () => setPage("modelSettingsPage"));
+$("enableAiReview").addEventListener("change", updateAiReviewModeVisibility);
+$("enableDirectionalReview").addEventListener("change", updateAiReviewModeVisibility);
+$("editPromptButton").addEventListener("click", () => openAiReviewPromptDialog().catch((error) => {
+  $("reviewSettingsHint").textContent = error.message;
+}));
+$("newPromptButton").addEventListener("click", newAiReviewPromptTemplate);
+$("savePromptButton").addEventListener("click", () => saveAiReviewPromptTemplate().catch((error) => {
+  $("reviewSettingsHint").textContent = error.message;
+}));
+$("resetPromptButton").addEventListener("click", () => resetAiReviewPromptTemplate().catch((error) => {
+  $("reviewSettingsHint").textContent = error.message;
+}));
+$("deletePromptButton").addEventListener("click", () => deleteAiReviewPromptTemplate().catch((error) => {
+  $("reviewSettingsHint").textContent = error.message;
+}));
+$("cancelPromptDialogButton").addEventListener("click", () => $("promptDialog").close());
+$("closePromptDialogButton").addEventListener("click", () => $("promptDialog").close());
+$("editDirectionalButton").addEventListener("click", () => openDirectionalDialog().catch((error) => {
+  $("reviewSettingsHint").textContent = error.message;
+}));
+$("newDirectionalButton").addEventListener("click", newDirectionalTemplate);
+$("addDirectionalItemButton").addEventListener("click", () => appendDirectionalEditorItem("", true));
+$("saveDirectionalButton").addEventListener("click", () => saveDirectionalTemplateFromDialog().catch((error) => {
+  $("reviewSettingsHint").textContent = error.message;
+}));
+$("cancelDirectionalDialogButton").addEventListener("click", () => $("directionalDialog").close());
+$("closeDirectionalDialogButton").addEventListener("click", () => $("directionalDialog").close());
+$("editForbiddenButton").addEventListener("click", () => openForbiddenDialog().catch((error) => {
+  $("reviewForbiddenHint").textContent = error.message;
+}));
+$("newForbiddenButton").addEventListener("click", newForbiddenTemplate);
+$("saveForbiddenButton").addEventListener("click", () => saveForbiddenTemplateFromDialog().catch((error) => {
+  $("reviewForbiddenHint").textContent = error.message;
+}));
+$("cancelForbiddenDialogButton").addEventListener("click", () => $("forbiddenDialog").close());
+$("closeForbiddenDialogButton").addEventListener("click", () => $("forbiddenDialog").close());
+$("openOutputDirButton").addEventListener("click", () => openAiReviewOutputDir().catch((error) => {
+  $("reviewTaskHint").textContent = error.message;
+}));
+$("openOutputFileButton").addEventListener("click", () => openAiReviewOutputFile().catch((error) => {
+  $("reviewTaskHint").textContent = error.message;
+}));
 $("startButton").addEventListener("click", startTask);
 $("resumeButton").addEventListener("click", resumeTask);
 $("stopButton").addEventListener("click", stopTask);
@@ -4797,8 +5505,20 @@ document.querySelectorAll(".subnav-link").forEach((button) => {
 renderCrossExcelHeaders([]);
 renderCrossExcelSearchResults(null);
 setCrossExcelOutput("");
+updateAiReviewModeVisibility();
 renderCurrentTaskStatus();
-Promise.all([loadSettings(), loadAsciiPatterns(), loadPromptTemplates(), loadBuiltinRules(), loadPendingRules(), loadAppUpdateInfo()]).then(refreshStatus).catch((error) => {
+Promise.all([
+  loadSettings(),
+  loadAsciiPatterns(),
+  loadPromptTemplates(),
+  loadBuiltinRules(),
+  loadPendingRules(),
+  loadAppUpdateInfo(),
+  loadAiReviewPromptTemplates(),
+  loadAiReviewDirectionalTemplates(),
+  loadAiReviewForbiddenTemplates(),
+  loadLatestAiReviewCache(),
+]).then(refreshStatus).catch((error) => {
   $("statusMessage").textContent = error.message;
 });
 setInterval(refreshStatus, 1500);

@@ -26,6 +26,8 @@ def _load_provider_settings(api_key_override: str | None = None) -> tuple[str, P
 
 def get_shared_ai_settings() -> dict[str, Any]:
     provider_name, provider = _load_provider_settings()
+    settings = SettingsStore(get_app_paths()).load()
+    ai_review_stage = dict(settings.input_defaults.get("ai_review_stage_settings", {}) or {})
     return {
         "provider": provider_name,
         "api_key": provider.api_key,
@@ -33,7 +35,7 @@ def get_shared_ai_settings() -> dict[str, Any]:
         "models": [],
         "max_concurrency": int(provider.max_concurrency or 6),
         "max_chars_per_request": 3000,
-        "enable_thinking": False,
+        "enable_thinking": bool(ai_review_stage.get("enable_thinking", False)),
         "disable_system_proxy": bool(provider.disable_system_proxy),
         "timeout_seconds": int(provider.timeout_seconds or 90),
         "base_url": provider.base_url,

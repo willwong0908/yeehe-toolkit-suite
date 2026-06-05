@@ -200,6 +200,9 @@ def build_default_settings() -> AppSettings:
                 "max_context_chars": 220,
                 "enable_thinking": False,
             },
+            "ai_review_stage_settings": {
+                "enable_thinking": False,
+            },
             "term_stage_settings": {
                 "single_item_char_limit": 500,
                 "batch_request_char_limit": 3000,
@@ -527,6 +530,7 @@ class SettingsStore:
         settings.input_defaults.setdefault("nontrans_stage_settings", {})
         settings.input_defaults.setdefault("term_recall_stage_settings", {})
         settings.input_defaults.setdefault("term_review_stage_settings", {})
+        settings.input_defaults.setdefault("ai_review_stage_settings", {})
         settings.input_defaults.setdefault("term_stage_settings", {})
 
         for key, value in defaults.input_defaults["nontrans_stage_settings"].items():
@@ -537,6 +541,8 @@ class SettingsStore:
             settings.input_defaults["term_recall_stage_settings"].setdefault(key, legacy_term_stage.get(key, value))
         for key, value in defaults.input_defaults["term_review_stage_settings"].items():
             settings.input_defaults["term_review_stage_settings"].setdefault(key, legacy_term_stage.get(key, value))
+        for key, value in defaults.input_defaults["ai_review_stage_settings"].items():
+            settings.input_defaults["ai_review_stage_settings"].setdefault(key, value)
         for key, value in defaults.input_defaults["term_stage_settings"].items():
             settings.input_defaults["term_stage_settings"].setdefault(key, value)
 
