@@ -1854,14 +1854,15 @@ INDEX_HTML = """<!doctype html>
         </div>
       </div>
       <nav class="sidebar-nav">
+        <button class="nav-link nav-link-top active" data-page-target="toolGuidePage">工具说明</button>
         <button class="nav-link nav-link-top" data-page-target="modelSettingsPage">模型设置</button>
 
-        <details class="nav-accordion" open data-accordion-key="text-preprocess">
+        <details class="nav-accordion" data-accordion-key="text-preprocess">
           <summary class="nav-accordion-summary">
             <span class="nav-group-title">文本预处理工具</span>
           </summary>
           <div class="nav-submenu">
-            <button class="nav-link nav-link-sub active" data-page-target="overviewPage">总览</button>
+            <button class="nav-link nav-link-sub" data-page-target="overviewPage">总览</button>
             <button class="nav-link nav-link-sub" data-page-target="modelStageSettingsPage">模型阶段设置</button>
             <button class="nav-link nav-link-sub" data-page-target="nontransSettingsPage">非译元素设置</button>
             <button class="nav-link nav-link-sub" data-page-target="promptSettingsPage">提示词设置</button>
@@ -1918,8 +1919,8 @@ INDEX_HTML = """<!doctype html>
       <header class="hero">
         <div>
           <p class="eyebrow">WebUI</p>
-          <h1 id="heroTitle">文本预处理工具</h1>
-          <p id="heroLede" class="lede">用于提取术语、识别非译元素，并整理文本预处理结果。</p>
+          <h1 id="heroTitle">工具说明</h1>
+          <p id="heroLede" class="lede">先了解每个工具能做什么，再开始任务。</p>
           <button id="updateNoticeButton" class="notice-button update-notice-button" type="button" hidden>
             <span class="notice-dot"></span>
             <span>发现新版本</span>
@@ -1931,7 +1932,23 @@ INDEX_HTML = """<!doctype html>
         </div>
       </header>
 
-      <section id="overviewPage" class="page-section active">
+      <section id="toolGuidePage" class="page-section active">
+        <div class="tool-guide-grid">
+          <button class="tool-guide-card active" type="button" data-tool-guide="textPreprocess">文本预处理工具</button>
+          <button class="tool-guide-card" type="button" data-tool-guide="aiReview">AI 审校工具</button>
+          <button class="tool-guide-card" type="button" data-tool-guide="crossExcel">跨Excel搜索与合并</button>
+          <button class="tool-guide-card" type="button" data-tool-guide="diffTool">Diff 工具</button>
+        </div>
+        <section class="card tool-guide-detail">
+          <div class="card-title">
+            <h3 id="toolGuideTitle">文本预处理工具</h3>
+            <p id="toolGuidePurpose">提取术语、识别非译元素，并整理成可交付的结果表。</p>
+          </div>
+          <div class="guide-steps" id="toolGuideSteps"></div>
+        </section>
+      </section>
+
+      <section id="overviewPage" class="page-section">
         <div class="grid dashboard-grid">
           <section class="card">
             <div class="card-title">
@@ -2911,6 +2928,61 @@ body {
 .shortcut-button { min-height: 40px; }
 .page-section { display: none; }
 .page-section.active { display: block; }
+.tool-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.tool-guide-card {
+  min-height: 118px;
+  justify-content: flex-start;
+  align-items: flex-end;
+  padding: 22px;
+  border-radius: 24px;
+  background: linear-gradient(145deg, rgba(255,255,255,.94), rgba(231,241,238,.88));
+  border: 1px solid rgba(204, 220, 216, .95);
+  box-shadow: var(--shadow);
+  color: #16263c;
+  font-size: 22px;
+  font-weight: 900;
+  text-align: left;
+  letter-spacing: -0.02em;
+}
+.tool-guide-card:hover,
+.tool-guide-card.active {
+  background: linear-gradient(145deg, #e7f5f1, #d7eae4);
+  color: var(--primary-strong);
+  transform: translateY(-2px);
+}
+.tool-guide-detail { min-height: 220px; }
+.guide-steps {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+.guide-step {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 14px;
+  border-radius: 16px;
+  background: #f5f9fb;
+  border: 1px solid #dce8f0;
+}
+.guide-step span {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  font-weight: 900;
+}
+.guide-step strong { display: block; margin-bottom: 4px; }
+.guide-step p { margin: 0; color: var(--muted); line-height: 1.65; }
 .section-header { margin: 0 0 16px; }
 .section-header h2 { margin: 0; font-size: 26px; }
 .section-header p { margin: 6px 0 0; color: var(--muted); }
@@ -3673,7 +3745,7 @@ let lastScanResult = null;
 let crossExcelScanState = null;
 let crossExcelSearchState = null;
 let crossExcelOutputFile = "";
-let currentPageId = "overviewPage";
+let currentPageId = "toolGuidePage";
 let aiReviewBatch = null;
 let aiReviewTaskId = "";
 let aiReviewLogCursor = 0;
@@ -3729,6 +3801,7 @@ const TASK_STATUS_BY_PAGE = {
   },
 };
 const PAGE_TASK_LABELS = {
+  toolGuidePage: "工具说明",
   overviewPage: "文本预处理工具",
   modelSettingsPage: "模型设置",
   modelStageSettingsPage: "文本预处理工具",
@@ -3742,6 +3815,7 @@ const PAGE_TASK_LABELS = {
   aiReviewForbiddenPage: "AI 审校工具",
 };
 const PAGE_HERO_COPY = {
+  toolGuidePage: { title: "工具说明", lede: "先了解每个工具能做什么，再开始任务。" },
   overviewPage: { title: "文本预处理工具", lede: "用于提取术语、识别非译元素，并整理文本预处理结果。" },
   modelSettingsPage: { title: "模型设置", lede: "统一管理当前工具使用的模型连接。" },
   modelStageSettingsPage: { title: "模型阶段设置", lede: "分别控制非译元素、术语召回和术语校验阶段。" },
@@ -3765,6 +3839,44 @@ const PAGE_ACCORDION_KEYS = {
   aiReviewTaskPage: "ai-review-tool",
   aiReviewSettingsPage: "ai-review-tool",
   aiReviewForbiddenPage: "ai-review-tool",
+};
+const TOOL_GUIDES = {
+  textPreprocess: {
+    title: "文本预处理工具",
+    purpose: "提取术语、识别非译元素，并整理成可交付的结果表。",
+    steps: [
+      ["准备文件", "选择包含 Excel 或 XLIFF 的目录，确认需要处理的文本列。"],
+      ["设置模型", "在模型设置中加载 DeepSeek 模型，按需要调整各阶段字符上限。"],
+      ["开始提取", "运行后工具会先保护非译元素，再提取术语并导出结果。"],
+    ],
+  },
+  aiReview: {
+    title: "AI 审校工具",
+    purpose: "检查译文问题，支持普通审校、定向审校和禁用词检查。",
+    steps: [
+      ["导入文件", "选择 Excel 或 XLIFF，Excel 需要先确认原文列和译文列。"],
+      ["选择方式", "在审校设置中选择普通审校或定向审校，必要时开启深度思考。"],
+      ["查看结果", "开始审校后查看进度、日志和结果表，可打开输出文件。"],
+    ],
+  },
+  crossExcel: {
+    title: "跨Excel搜索与合并",
+    purpose: "在多个 Excel 中搜索内容，也可以按表头把多个表合并到一起。",
+    steps: [
+      ["选择目录", "选择需要搜索或合并的 Excel 文件所在目录。"],
+      ["搜索内容", "输入关键词后查看命中的整行内容，点击单元格可复制。"],
+      ["合并文件", "选择要保留的表头列，确认后输出合并结果。"],
+    ],
+  },
+  diffTool: {
+    title: "Diff 工具",
+    purpose: "预留用于对比文本或表格差异，帮助检查修改前后的变化。",
+    steps: [
+      ["功能预留", "该工具还未开放。"],
+      ["后续用途", "之后会用于对比文件差异、定位改动和辅助验收。"],
+      ["当前建议", "如果需要对比结果，先使用其他外部 Diff 工具。"],
+    ],
+  },
 };
 
 function setPage(pageId) {
@@ -3824,6 +3936,24 @@ function renderCurrentTaskStatus() {
     state.stageLabel,
     state.message,
   );
+}
+
+function renderToolGuide(toolKey = "textPreprocess") {
+  const guide = TOOL_GUIDES[toolKey] || TOOL_GUIDES.textPreprocess;
+  $("toolGuideTitle").textContent = guide.title;
+  $("toolGuidePurpose").textContent = guide.purpose;
+  $("toolGuideSteps").innerHTML = guide.steps.map((step, index) => `
+    <div class="guide-step">
+      <span>${index + 1}</span>
+      <div>
+        <strong>${escapeHtml(step[0])}</strong>
+        <p>${escapeHtml(step[1])}</p>
+      </div>
+    </div>
+  `).join("");
+  document.querySelectorAll(".tool-guide-card").forEach((card) => {
+    card.classList.toggle("active", card.dataset.toolGuide === toolKey);
+  });
 }
 
 function renderTaskStatus(taskLabel, pillText, pillClass, stageLabel, message) {
@@ -6149,10 +6279,16 @@ document.querySelectorAll(".nav-link, .shortcut-button").forEach((button) => {
   button.addEventListener("click", () => setPage(button.dataset.pageTarget));
 });
 
+document.querySelectorAll(".tool-guide-card").forEach((button) => {
+  button.addEventListener("click", () => renderToolGuide(button.dataset.toolGuide));
+});
+
 document.querySelectorAll(".subnav-link").forEach((button) => {
   button.addEventListener("click", () => setSubtab(button.dataset.subtabGroup, button.dataset.subtabTarget));
 });
 
+setPage("toolGuidePage");
+renderToolGuide();
 renderCrossExcelHeaders([]);
 renderCrossExcelSearchResults(null);
 setCrossExcelOutput("");
