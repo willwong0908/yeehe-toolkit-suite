@@ -19,6 +19,64 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, ConfigDict
 
 if __package__:
+    from .ai_review.cache_service import (
+        clear_read_cache as clear_ai_review_read_cache,
+        create_batch as create_ai_review_batch,
+        get_batch as get_ai_review_batch,
+        get_batch_items as get_ai_review_batch_items,
+        get_latest_ready_batch as get_latest_ai_review_batch,
+        open_directory as open_ai_review_directory,
+        replace_batch_items as replace_ai_review_batch_items,
+        save_upload_file as save_ai_review_upload_file,
+    )
+    from .ai_review.config import OUTPUTS_DIR as AI_REVIEW_OUTPUTS_DIR
+    from .ai_review.database import init_db as init_ai_review_db
+    from .ai_review.directional_service import (
+        delete_directional_template,
+        get_directional_template,
+        list_directional_templates,
+        save_directional_template,
+    )
+    from .ai_review.excel_mapping_service import (
+        delete_excel_mapping_preset,
+        get_excel_mapping_preset,
+        list_excel_mapping_presets,
+        save_excel_mapping_preset,
+    )
+    from .ai_review.file_reader import (
+        detect_file_type as detect_ai_review_file_type,
+        read_excel_headers as read_ai_review_excel_headers,
+        read_excel_items as read_ai_review_excel_items,
+        read_excel_items_by_mapping as read_ai_review_excel_items_by_mapping,
+        read_xliff_items as read_ai_review_xliff_items,
+        read_xliff_language_metadata as read_ai_review_xliff_language_metadata,
+    )
+    from .ai_review.forbidden_service import (
+        delete_forbidden_template,
+        get_forbidden_template,
+        list_forbidden_templates,
+        save_forbidden_template,
+    )
+    from .ai_review.prompt_service import (
+        delete_prompt_template as delete_ai_review_prompt_template,
+        get_prompt_template as get_ai_review_prompt_template,
+        list_prompt_templates as list_ai_review_prompt_templates,
+        reset_default_prompt_template as reset_ai_review_prompt_template,
+        save_prompt_template as save_ai_review_prompt_template,
+    )
+    from .ai_review.review_service import (
+        ReviewTaskError,
+        create_review_task,
+        get_review_logs,
+        get_review_results,
+        get_review_task,
+    )
+    from .ai_review.shared_provider import (
+        SharedProviderError,
+        get_shared_ai_settings as get_ai_review_shared_ai_settings,
+        list_models as list_ai_review_models,
+        test_chat as test_ai_review_chat,
+    )
     from .constants import APP_VERSION, UPDATE_ASSET_NAME_HINTS, UPDATE_RELEASE_API
     from .core import scan_folder
     from .cross_excel import merge_excel_files_by_headers, scan_cross_excel_folder, search_excel_rows
@@ -46,6 +104,64 @@ else:
     package_root = Path(__file__).resolve().parent.parent
     if str(package_root) not in sys.path:
         sys.path.insert(0, str(package_root))
+    from term_extractor_app.ai_review.cache_service import (
+        clear_read_cache as clear_ai_review_read_cache,
+        create_batch as create_ai_review_batch,
+        get_batch as get_ai_review_batch,
+        get_batch_items as get_ai_review_batch_items,
+        get_latest_ready_batch as get_latest_ai_review_batch,
+        open_directory as open_ai_review_directory,
+        replace_batch_items as replace_ai_review_batch_items,
+        save_upload_file as save_ai_review_upload_file,
+    )
+    from term_extractor_app.ai_review.config import OUTPUTS_DIR as AI_REVIEW_OUTPUTS_DIR
+    from term_extractor_app.ai_review.database import init_db as init_ai_review_db
+    from term_extractor_app.ai_review.directional_service import (
+        delete_directional_template,
+        get_directional_template,
+        list_directional_templates,
+        save_directional_template,
+    )
+    from term_extractor_app.ai_review.excel_mapping_service import (
+        delete_excel_mapping_preset,
+        get_excel_mapping_preset,
+        list_excel_mapping_presets,
+        save_excel_mapping_preset,
+    )
+    from term_extractor_app.ai_review.file_reader import (
+        detect_file_type as detect_ai_review_file_type,
+        read_excel_headers as read_ai_review_excel_headers,
+        read_excel_items as read_ai_review_excel_items,
+        read_excel_items_by_mapping as read_ai_review_excel_items_by_mapping,
+        read_xliff_items as read_ai_review_xliff_items,
+        read_xliff_language_metadata as read_ai_review_xliff_language_metadata,
+    )
+    from term_extractor_app.ai_review.forbidden_service import (
+        delete_forbidden_template,
+        get_forbidden_template,
+        list_forbidden_templates,
+        save_forbidden_template,
+    )
+    from term_extractor_app.ai_review.prompt_service import (
+        delete_prompt_template as delete_ai_review_prompt_template,
+        get_prompt_template as get_ai_review_prompt_template,
+        list_prompt_templates as list_ai_review_prompt_templates,
+        reset_default_prompt_template as reset_ai_review_prompt_template,
+        save_prompt_template as save_ai_review_prompt_template,
+    )
+    from term_extractor_app.ai_review.review_service import (
+        ReviewTaskError,
+        create_review_task,
+        get_review_logs,
+        get_review_results,
+        get_review_task,
+    )
+    from term_extractor_app.ai_review.shared_provider import (
+        SharedProviderError,
+        get_shared_ai_settings as get_ai_review_shared_ai_settings,
+        list_models as list_ai_review_models,
+        test_chat as test_ai_review_chat,
+    )
     from term_extractor_app.constants import APP_VERSION, UPDATE_ASSET_NAME_HINTS, UPDATE_RELEASE_API
     from term_extractor_app.core import scan_folder
     from term_extractor_app.cross_excel import (
@@ -183,6 +299,58 @@ class CrossExcelMergePayload(BaseModel):
     folder_path: str
     headers: list[str]
     apply_format: bool = True
+
+
+class AIReviewOpenFilePayload(BaseModel):
+    file_path: str
+
+
+class AIReviewSelectColumnsPayload(BaseModel):
+    batch_id: str
+    source_column: str
+    target_column: str
+
+
+class AIReviewExcelMappingPayload(BaseModel):
+    batch_id: str
+    mapping: dict
+
+
+class AIReviewExcelMappingPresetSavePayload(BaseModel):
+    id: str | None = None
+    name: str
+    mapping: dict
+
+
+class AIReviewPromptTemplateSavePayload(BaseModel):
+    id: str | None = None
+    name: str
+    system_prompt: str
+    user_prompt: str
+
+
+class AIReviewDirectionalTemplateSavePayload(BaseModel):
+    id: str | None = None
+    name: str
+    items: list[dict]
+
+
+class AIReviewForbiddenTemplateSavePayload(BaseModel):
+    id: str | None = None
+    name: str
+    words_text: str
+
+
+class AIReviewStartPayload(BaseModel):
+    batch_id: str
+    prompt_template_id: str | None = None
+    source_language: str = ""
+    target_language: str = ""
+    mode: str = "normal"
+    directional_template_id: str | None = None
+    enable_ai_review: bool = True
+    enable_forbidden_check: bool = False
+    forbidden_template_id: str | None = None
 
 
 PROMPT_TEMPLATE_META = [
@@ -648,9 +816,45 @@ def _save_builtin_nontrans_rules_to_library(rules_payload: list[BuiltinNonTransR
     return builtin_nontrans_rules_response()
 
 
+def _open_local_file(path_text: str) -> None:
+    path = Path(path_text)
+    if not path.exists():
+        raise FileNotFoundError("文件不存在：{0}".format(path))
+    if os.name == "nt":
+        os.startfile(path)  # type: ignore[attr-defined]
+        return
+    subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(path)])
+
+
+def _ai_review_batch_response(batch_id: str, message: str) -> dict:
+    batch = get_ai_review_batch(batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="读取批次不存在")
+    preview = get_ai_review_batch_items(batch_id, limit=5)
+    metadata = dict(batch.get("metadata", {}) or {})
+    return {
+        "ok": True,
+        "message": message,
+        "batch": {
+            "id": batch["id"],
+            "filename": batch["original_filename"],
+            "file_type": batch["file_type"],
+            "source_column": batch["source_column"],
+            "target_column": batch["target_column"],
+            "item_count": batch["item_count"],
+            "source_language": metadata.get("source_language", ""),
+            "target_language": metadata.get("target_language", ""),
+            "updated_at": batch["updated_at"],
+            "metadata": metadata,
+        },
+        "preview": preview,
+    }
+
+
 def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
     task_facade = facade or ExtractionTaskFacade()
     app = FastAPI(title="AI Term Extractor WebUI")
+    init_ai_review_db()
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
@@ -1065,6 +1269,374 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.get("/api/dialog/select-review-file")
+    async def select_review_file():
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            selected = filedialog.askopenfilename(
+                title="选择待审校文件",
+                filetypes=[
+                    ("支持的文件", "*.xlsx *.xlsm *.xlf *.xliff"),
+                    ("Excel 文件", "*.xlsx *.xlsm"),
+                    ("XLIFF 文件", "*.xlf *.xliff"),
+                ],
+            )
+            root.destroy()
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"file_path": selected or "", "cancelled": not bool(selected)}
+
+    @app.post("/api/ai-review/file/open")
+    async def ai_review_open_file(payload: AIReviewOpenFilePayload):
+        file_path = str(payload.file_path or "").strip()
+        if not file_path:
+            raise HTTPException(status_code=400, detail="请先选择文件。")
+        try:
+            _open_local_file(file_path)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"ok": True, "file_path": file_path}
+
+    @app.post("/api/ai-review/file/load")
+    async def ai_review_load_file(payload: AIReviewOpenFilePayload):
+        file_path = Path(str(payload.file_path or "").strip())
+        if not str(file_path):
+            raise HTTPException(status_code=400, detail="请先选择文件。")
+        if not file_path.exists() or not file_path.is_file():
+            raise HTTPException(status_code=400, detail="文件不存在。")
+        filename = file_path.name
+        try:
+            stored_path = save_ai_review_upload_file(filename, file_path.read_bytes())
+            file_type = detect_ai_review_file_type(stored_path)
+            if file_type == "excel":
+                metadata = read_ai_review_excel_headers(stored_path)
+                batch_id = create_ai_review_batch(
+                    original_filename=filename,
+                    stored_path=stored_path,
+                    file_type=file_type,
+                    status="uploaded",
+                    metadata={**metadata, "original_file_path": str(file_path)},
+                )
+                return {
+                    "ok": True,
+                    "message": "Excel 文件已读取，请继续选择列或列映射。",
+                    "file_type": file_type,
+                    "batch_id": batch_id,
+                    "filename": filename,
+                    "headers": metadata["headers"],
+                    "headers_by_sheet": metadata["headers_by_sheet"],
+                    "columns_by_sheet": metadata["columns_by_sheet"],
+                    "sheet_names": metadata["sheet_names"],
+                    "needs_column_selection": True,
+                }
+
+            items = read_ai_review_xliff_items(stored_path, filename)
+            language_metadata = read_ai_review_xliff_language_metadata(stored_path)
+            batch_id = create_ai_review_batch(
+                original_filename=filename,
+                stored_path=stored_path,
+                file_type=file_type,
+                status="uploaded",
+                metadata={**language_metadata, "original_file_path": str(file_path)},
+            )
+            replace_ai_review_batch_items(
+                batch_id=batch_id,
+                items=items,
+                metadata_update={"preview_ready": True, **language_metadata, "original_file_path": str(file_path)},
+            )
+            return _ai_review_batch_response(batch_id, "XLIFF 读取完成")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="读取失败：{0}".format(exc)) from exc
+
+    @app.post("/api/ai-review/select-columns")
+    async def ai_review_select_columns(payload: AIReviewSelectColumnsPayload):
+        batch = get_ai_review_batch(payload.batch_id)
+        if not batch:
+            raise HTTPException(status_code=404, detail="读取批次不存在")
+        if batch["file_type"] != "excel":
+            raise HTTPException(status_code=400, detail="只有 Excel 文件需要选择列")
+        try:
+            items = read_ai_review_excel_items(
+                Path(batch["stored_path"]),
+                payload.source_column,
+                payload.target_column,
+                batch["original_filename"],
+            )
+            replace_ai_review_batch_items(
+                batch_id=payload.batch_id,
+                items=items,
+                source_column=payload.source_column,
+                target_column=payload.target_column,
+                metadata_update={"preview_ready": True},
+            )
+            return _ai_review_batch_response(payload.batch_id, "Excel 读取完成")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="读取失败：{0}".format(exc)) from exc
+
+    @app.post("/api/ai-review/select-excel-mapping")
+    async def ai_review_select_excel_mapping(payload: AIReviewExcelMappingPayload):
+        batch = get_ai_review_batch(payload.batch_id)
+        if not batch:
+            raise HTTPException(status_code=404, detail="读取批次不存在")
+        if batch["file_type"] != "excel":
+            raise HTTPException(status_code=400, detail="只有 Excel 文件需要配置列映射")
+        try:
+            items = read_ai_review_excel_items_by_mapping(
+                Path(batch["stored_path"]),
+                payload.mapping,
+                batch["original_filename"],
+            )
+            replace_ai_review_batch_items(
+                batch_id=payload.batch_id,
+                items=items,
+                source_column=None,
+                target_column=None,
+                metadata_update={
+                    "preview_ready": True,
+                    "excel_mapping": payload.mapping,
+                    "source_language": str(payload.mapping.get("source_language") or ""),
+                    "target_language": str(payload.mapping.get("target_language") or ""),
+                },
+            )
+            return _ai_review_batch_response(payload.batch_id, "Excel 列映射读取完成")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="读取失败：{0}".format(exc)) from exc
+
+    @app.get("/api/ai-review/cache/latest")
+    async def ai_review_latest_cache():
+        batch = get_latest_ai_review_batch()
+        if not batch:
+            return {"has_cache": False}
+        return {"has_cache": True, **_ai_review_batch_response(batch["id"], "发现上一批读取缓存")}
+
+    @app.post("/api/ai-review/cache/use")
+    async def ai_review_use_cache():
+        batch = get_latest_ai_review_batch()
+        if not batch:
+            raise HTTPException(status_code=404, detail="没有可用读取缓存")
+        return _ai_review_batch_response(batch["id"], "已使用上一批读取缓存")
+
+    @app.post("/api/ai-review/cache/clear")
+    async def ai_review_clear_cache():
+        clear_ai_review_read_cache()
+        return {"ok": True, "message": "读取缓存已清空"}
+
+    @app.get("/api/ai-review/ai-settings")
+    async def ai_review_ai_settings():
+        settings = get_ai_review_shared_ai_settings()
+        return {
+            "provider": settings.get("provider", "DeepSeek"),
+            "has_api_key": bool(settings.get("api_key")),
+            "selected_model": settings.get("selected_model", ""),
+            "max_concurrency": settings.get("max_concurrency", 6),
+            "max_chars_per_request": settings.get("max_chars_per_request", 3000),
+            "enable_thinking": bool(settings.get("enable_thinking", False)),
+        }
+
+    @app.post("/api/ai-review/ai/test")
+    async def ai_review_test_model():
+        settings = get_ai_review_shared_ai_settings()
+        api_key = str(settings.get("api_key", "") or "")
+        model = str(settings.get("selected_model", "") or "")
+        if not api_key:
+            raise HTTPException(status_code=400, detail="请先在模型设置中填写 API Key。")
+        if not model:
+            raise HTTPException(status_code=400, detail="请先在模型设置中选择模型。")
+        try:
+            content = test_ai_review_chat(
+                api_key,
+                model,
+                enable_thinking=bool(settings.get("enable_thinking", False)),
+            )
+        except SharedProviderError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "message": "测试 OK", "model": model, "response": content}
+
+    @app.get("/api/ai-review/excel-mapping-presets")
+    async def ai_review_excel_mapping_presets():
+        return {"presets": list_excel_mapping_presets()}
+
+    @app.get("/api/ai-review/excel-mapping-presets/{preset_id}")
+    async def ai_review_excel_mapping_preset(preset_id: str):
+        try:
+            return {"preset": get_excel_mapping_preset(preset_id)}
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/ai-review/excel-mapping-presets")
+    async def ai_review_save_excel_mapping_preset(payload: AIReviewExcelMappingPresetSavePayload):
+        preset = save_excel_mapping_preset(payload.name, payload.mapping, payload.id)
+        return {"ok": True, "message": "Excel 列映射预设已保存", "preset": preset}
+
+    @app.delete("/api/ai-review/excel-mapping-presets/{preset_id}")
+    async def ai_review_delete_excel_mapping_preset(preset_id: str):
+        try:
+            delete_excel_mapping_preset(preset_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"ok": True, "message": "Excel 列映射预设已删除"}
+
+    @app.get("/api/ai-review/prompt-templates")
+    async def ai_review_prompt_templates():
+        return {"templates": list_ai_review_prompt_templates()}
+
+    @app.get("/api/ai-review/prompt-templates/{template_id}")
+    async def ai_review_prompt_template(template_id: str):
+        try:
+            return {"template": get_ai_review_prompt_template(template_id)}
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/ai-review/prompt-templates")
+    async def ai_review_save_prompt_template(payload: AIReviewPromptTemplateSavePayload):
+        try:
+            template = save_ai_review_prompt_template(
+                template_id=payload.id,
+                name=payload.name.strip() or "未命名模板",
+                system_prompt=payload.system_prompt,
+                user_prompt=payload.user_prompt,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "message": "提示词模板已保存", "template": template}
+
+    @app.post("/api/ai-review/prompt-templates/reset-default")
+    async def ai_review_reset_prompt_template():
+        template = reset_ai_review_prompt_template()
+        return {"ok": True, "message": "默认提示词已恢复", "template": template}
+
+    @app.delete("/api/ai-review/prompt-templates/{template_id}")
+    async def ai_review_delete_prompt_template(template_id: str):
+        try:
+            delete_ai_review_prompt_template(template_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "message": "提示词模板已删除"}
+
+    @app.get("/api/ai-review/directional-templates")
+    async def ai_review_directional_templates():
+        return {"templates": list_directional_templates()}
+
+    @app.get("/api/ai-review/directional-templates/{template_id}")
+    async def ai_review_directional_template(template_id: str):
+        try:
+            return {"template": get_directional_template(template_id)}
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/ai-review/directional-templates")
+    async def ai_review_save_directional_template(payload: AIReviewDirectionalTemplateSavePayload):
+        try:
+            template = save_directional_template(
+                payload.id,
+                payload.name.strip() or "未命名定向模板",
+                payload.items,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "message": "定向审校模板已保存", "template": template}
+
+    @app.delete("/api/ai-review/directional-templates/{template_id}")
+    async def ai_review_delete_directional_template(template_id: str):
+        try:
+            delete_directional_template(template_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "message": "定向审校模板已删除"}
+
+    @app.get("/api/ai-review/forbidden-templates")
+    async def ai_review_forbidden_templates():
+        return {"templates": list_forbidden_templates()}
+
+    @app.get("/api/ai-review/forbidden-templates/{template_id}")
+    async def ai_review_forbidden_template(template_id: str):
+        try:
+            return {"template": get_forbidden_template(template_id)}
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/ai-review/forbidden-templates")
+    async def ai_review_save_forbidden_template(payload: AIReviewForbiddenTemplateSavePayload):
+        try:
+            template = save_forbidden_template(
+                payload.id,
+                payload.name.strip() or "未命名禁用词模板",
+                payload.words_text,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "message": "禁用词模板已保存", "template": template}
+
+    @app.delete("/api/ai-review/forbidden-templates/{template_id}")
+    async def ai_review_delete_forbidden_template(template_id: str):
+        try:
+            delete_forbidden_template(template_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True, "message": "禁用词模板已删除"}
+
+    @app.post("/api/ai-review/start")
+    async def ai_review_start(payload: AIReviewStartPayload):
+        try:
+            task_id = create_review_task(
+                payload.batch_id,
+                payload.prompt_template_id,
+                payload.source_language.strip(),
+                payload.target_language.strip(),
+                payload.mode,
+                payload.directional_template_id,
+                payload.enable_ai_review,
+                payload.enable_forbidden_check,
+                payload.forbidden_template_id,
+            )
+        except (ReviewTaskError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        task = get_review_task(task_id)
+        return {"ok": True, "message": "审校任务已启动", "task": task}
+
+    @app.get("/api/ai-review/tasks/{task_id}")
+    async def ai_review_task(task_id: str):
+        task = get_review_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="审校任务不存在")
+        return {"task": task, "results": get_review_results(task_id, limit=20)}
+
+    @app.get("/api/ai-review/tasks/{task_id}/logs")
+    async def ai_review_task_logs(task_id: str, after_id: int = 0):
+        if not get_review_task(task_id):
+            raise HTTPException(status_code=404, detail="审校任务不存在")
+        return {"logs": get_review_logs(task_id, after_id)}
+
+    @app.post("/api/ai-review/outputs/open-folder")
+    async def ai_review_open_outputs():
+        try:
+            open_ai_review_directory(AI_REVIEW_OUTPUTS_DIR)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="打开目录失败：{0}".format(exc)) from exc
+        return {"ok": True, "message": "已打开结果目录", "path": str(AI_REVIEW_OUTPUTS_DIR)}
+
+    @app.post("/api/ai-review/outputs/open-file")
+    async def ai_review_open_output_file(payload: AIReviewOpenFilePayload):
+        file_path = str(payload.file_path or "").strip()
+        if not file_path:
+            raise HTTPException(status_code=400, detail="暂无可打开的结果文件。")
+        try:
+            _open_local_file(file_path)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="打开文件失败：{0}".format(exc)) from exc
+        return {"ok": True, "file_path": file_path}
+
     @app.post("/api/tasks/start")
     async def start_task(payload: StartTaskPayload):
         settings = task_facade.load_settings()
@@ -1250,7 +1822,7 @@ INDEX_HTML = """<!doctype html>
             <span class="nav-group-title">AI 审校工具</span>
           </summary>
           <div class="nav-submenu">
-            <button class="nav-link nav-link-sub nav-link-placeholder" type="button" disabled>功能预留</button>
+            <button class="nav-link nav-link-sub" data-page-target="aiReviewPage">审校任务</button>
           </div>
         </details>
 
@@ -1695,6 +2267,146 @@ INDEX_HTML = """<!doctype html>
         </div>
       </section>
 
+      <section id="aiReviewPage" class="page-section">
+        <div class="grid dashboard-grid">
+          <section class="card">
+            <div class="card-title">
+              <h3>读取文件</h3>
+              <p>支持 Excel 与 XLIFF。读取后可预览前 5 条并开始审校。</p>
+            </div>
+            <div class="grid two">
+              <label>当前文件
+                <span class="secret-field">
+                  <input id="reviewFilePath" placeholder="请选择待审校文件" readonly />
+                  <button id="chooseReviewFileButton" class="mini-button" type="button">选择文件</button>
+                </span>
+              </label>
+              <div class="cross-summary-box">
+                <span>读取状态</span>
+                <strong id="reviewBatchCount">0</strong>
+                <small id="reviewFileHint">尚未读取文件。</small>
+              </div>
+            </div>
+            <div id="reviewColumnPanel" class="column-panel hidden review-column-panel">
+              <div class="field">
+                <label for="sourceColumn">原文列</label>
+                <select id="sourceColumn"></select>
+              </div>
+              <div class="field">
+                <label for="targetColumn">译文列</label>
+                <select id="targetColumn"></select>
+              </div>
+              <div class="button-row review-column-actions">
+                <button id="confirmColumnsButton" class="primary" type="button">确认读取</button>
+              </div>
+            </div>
+            <div class="actions">
+              <button id="openReviewFileButton" class="secondary" type="button" disabled>打开文件</button>
+              <button id="useReviewCacheButton" class="secondary" type="button">使用上次缓存</button>
+              <button id="clearReviewCacheButton" class="secondary" type="button">清空缓存</button>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-title">
+              <h3>审校设置</h3>
+              <p>模型连接共用顶部模型设置；这里控制审校方式和模板。</p>
+            </div>
+            <div class="grid two">
+              <label>原文语种<input id="sourceLanguageInput" placeholder="例如 English" /></label>
+              <label>译文语种<input id="targetLanguageInput" placeholder="例如 简体中文" /></label>
+            </div>
+            <div class="actions review-toggle-row">
+              <label class="check-line"><input id="enableAiReview" type="checkbox" checked /><span>启用 AI 审校</span></label>
+              <label id="directionalReviewLine" class="check-line"><input id="enableDirectionalReview" type="checkbox" /><span>定向审校</span></label>
+              <label class="check-line"><input id="enableForbiddenCheck" type="checkbox" /><span>启用禁用词</span></label>
+            </div>
+            <div class="grid two">
+              <label>提示词模板<select id="promptTemplateSelect"></select></label>
+              <label id="directionalTemplatePanel" class="hidden">定向审校模板<select id="directionalTemplateSelect"></select></label>
+              <label id="forbiddenTemplatePanel" class="hidden">禁用词模板<select id="forbiddenTemplateSelect"></select></label>
+            </div>
+            <div class="actions">
+              <button id="openModelSettingsFromReviewButton" class="secondary" type="button">模型设置</button>
+              <button id="testReviewModelButton" class="secondary" type="button">测试模型</button>
+              <button id="editPromptButton" class="secondary" type="button">编辑提示词</button>
+              <button id="editDirectionalButton" class="secondary" type="button">编辑定向</button>
+              <button id="editForbiddenButton" class="secondary" type="button">编辑禁用词</button>
+              <button id="startReviewButton" class="primary" type="button">开始审校</button>
+            </div>
+            <span id="reviewTaskHint" class="hint"></span>
+          </section>
+        </div>
+
+        <div class="grid dashboard-grid">
+          <section class="card">
+            <div class="card-title">
+              <h3>读取预览</h3>
+              <p>默认展示前 5 条，便于确认原文和译文是否对应。</p>
+            </div>
+            <div class="pattern-table-wrap">
+              <table class="pattern-table">
+                <thead>
+                  <tr>
+                    <th>来源文件</th>
+                    <th>sheet / segment ID</th>
+                    <th>原始行号</th>
+                    <th>原文</th>
+                    <th>译文</th>
+                    <th>提示</th>
+                  </tr>
+                </thead>
+                <tbody id="previewBody">
+                  <tr><td colspan="6" class="empty-cell">暂无预览</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-title">
+              <h3>审校进度</h3>
+              <p id="reviewProgress">尚未开始</p>
+            </div>
+            <div id="outputPanel" class="result-file hidden">
+              <span>结果文件</span>
+              <strong id="outputPath">暂无输出</strong>
+            </div>
+            <div class="actions">
+              <button id="openOutputDirButton" class="secondary" type="button">打开输出目录</button>
+              <button id="openOutputFileButton" class="secondary" type="button" disabled>打开结果文件</button>
+            </div>
+            <div class="review-log-wrap">
+              <ol id="reviewLogList" class="review-log-list"></ol>
+            </div>
+          </section>
+        </div>
+
+        <section class="card">
+          <div class="card-title">
+            <h3>审校结果预览</h3>
+            <p>展示前 20 条结果，完整结果会自动保存为 Excel。</p>
+          </div>
+          <div class="pattern-table-wrap">
+            <table class="pattern-table">
+              <thead id="reviewResultHead">
+                <tr>
+                  <th>原文</th>
+                  <th>译文</th>
+                  <th>是否有问题</th>
+                  <th>问题类型</th>
+                  <th>问题说明</th>
+                  <th>修改建议</th>
+                </tr>
+              </thead>
+              <tbody id="reviewResultBody">
+                <tr><td colspan="6" class="empty-cell">暂无审校结果</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
     </main>
   </div>
 
@@ -1725,6 +2437,90 @@ INDEX_HTML = """<!doctype html>
       </div>
     </div>
   </div>
+
+  <dialog id="promptDialog" class="dialog">
+    <form method="dialog" class="dialog-body">
+      <div class="dialog-head">
+        <div>
+          <h2>提示词模板</h2>
+          <p>用户提示词必须包含 {text}，工具会把待审校 JSON 条目填入这里。</p>
+        </div>
+        <button id="closePromptDialogButton" class="icon-button" type="button" aria-label="关闭">×</button>
+      </div>
+      <input id="promptTemplateId" type="hidden" />
+      <div class="field">
+        <label for="promptNameInput">模板名</label>
+        <input id="promptNameInput" type="text" />
+      </div>
+      <div class="field">
+        <label for="systemPromptInput">系统提示词</label>
+        <textarea id="systemPromptInput" rows="6"></textarea>
+      </div>
+      <div class="field">
+        <label for="userPromptInput">用户提示词</label>
+        <textarea id="userPromptInput" rows="10"></textarea>
+      </div>
+      <div class="dialog-actions">
+        <button id="savePromptButton" type="button">保存模板</button>
+        <button id="newPromptButton" class="secondary" type="button">新建模板</button>
+        <button id="resetPromptButton" class="secondary" type="button">恢复默认</button>
+        <button id="deletePromptButton" class="danger" type="button">删除模板</button>
+        <button id="cancelPromptDialogButton" class="secondary" type="button">取消</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="directionalDialog" class="dialog">
+    <form method="dialog" class="dialog-body">
+      <div class="dialog-head">
+        <div>
+          <h2>定向审校模板</h2>
+          <p>每个启用的审校类型会成为结果 Excel 中的一列。</p>
+        </div>
+        <button id="closeDirectionalDialogButton" class="icon-button" type="button" aria-label="关闭">×</button>
+      </div>
+      <input id="directionalTemplateId" type="hidden" />
+      <div class="field">
+        <label for="directionalNameInput">模板名</label>
+        <input id="directionalNameInput" type="text" />
+      </div>
+      <div id="directionalItems" class="directional-items"></div>
+      <div class="actions">
+        <button id="addDirectionalItemButton" class="secondary" type="button">新建选项</button>
+      </div>
+      <div class="dialog-actions">
+        <button id="saveDirectionalButton" type="button">保存模板</button>
+        <button id="newDirectionalButton" class="secondary" type="button">新建模板</button>
+        <button id="cancelDirectionalDialogButton" class="secondary" type="button">取消</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="forbiddenDialog" class="dialog">
+    <form method="dialog" class="dialog-body">
+      <div class="dialog-head">
+        <div>
+          <h2>禁用词模板</h2>
+          <p>一行一个禁用词；检查译文，不区分大小写，包含即命中。</p>
+        </div>
+        <button id="closeForbiddenDialogButton" class="icon-button" type="button" aria-label="关闭">×</button>
+      </div>
+      <input id="forbiddenTemplateId" type="hidden" />
+      <div class="field">
+        <label for="forbiddenNameInput">模板名</label>
+        <input id="forbiddenNameInput" type="text" />
+      </div>
+      <div class="field">
+        <label for="forbiddenWordsInput">禁用词列表</label>
+        <textarea id="forbiddenWordsInput" rows="12"></textarea>
+      </div>
+      <div class="dialog-actions">
+        <button id="saveForbiddenButton" type="button">保存模板</button>
+        <button id="newForbiddenButton" class="secondary" type="button">新建模板</button>
+        <button id="cancelForbiddenDialogButton" class="secondary" type="button">取消</button>
+      </div>
+    </form>
+  </dialog>
   <div id="appUpdateOverlay" class="modal-overlay" hidden>
     <div class="modal-card notice-modal update-modal">
       <div class="modal-header">
@@ -2557,6 +3353,14 @@ const TASK_STATUS_BY_PAGE = {
     message: "等待开始任务",
     active: false,
   },
+  aiReviewPage: {
+    taskLabel: "AI 审校工具",
+    pill: "空闲",
+    pillClass: "",
+    stageLabel: "未启动",
+    message: "等待开始任务",
+    active: false,
+  },
 };
 const PAGE_TASK_LABELS = {
   overviewPage: "文本预处理工具",
@@ -2567,6 +3371,7 @@ const PAGE_TASK_LABELS = {
   runDetailsPage: "文本预处理工具",
   resultsPage: "文本预处理工具",
   crossExcelPage: "跨Excel搜索与合并",
+  aiReviewPage: "AI 审校工具",
 };
 const PAGE_HERO_COPY = {
   overviewPage: { title: "文本预处理工具", lede: "用于提取术语、识别非译元素，并整理文本预处理结果。" },
@@ -2577,6 +3382,7 @@ const PAGE_HERO_COPY = {
   runDetailsPage: { title: "运行详情", lede: "查看任务过程、统计和日志。" },
   resultsPage: { title: "结果", lede: "在这里查看导出结果和数量概览。" },
   crossExcelPage: { title: "跨Excel搜索与合并", lede: "跨文件搜索整行内容，并按表头合并结果。" },
+  aiReviewPage: { title: "AI 审校工具", lede: "读取 Excel 或 XLIFF，执行普通审校、定向审校与禁用词检查。" },
 };
 const PAGE_ACCORDION_KEYS = {
   overviewPage: "text-preprocess",
@@ -2586,6 +3392,7 @@ const PAGE_ACCORDION_KEYS = {
   runDetailsPage: "text-preprocess",
   resultsPage: "text-preprocess",
   crossExcelPage: "cross-excel-search",
+  aiReviewPage: "ai-review-tool",
 };
 
 function setPage(pageId) {
