@@ -377,7 +377,7 @@ async def fetch_app_update_info() -> dict:
                 UPDATE_RELEASE_API,
                 headers={
                     "Accept": "application/vnd.github+json",
-                    "User-Agent": "TextForge-Toolkit-Updater",
+                    "User-Agent": "Yeehe-Toolkit-Suite-Updater",
                 },
             )
             response.raise_for_status()
@@ -482,16 +482,16 @@ function Find-BundlePayloadRoot {
   throw "未找到更新包中的启动文件。"
 }
 
-$workDir = Join-Path ([System.IO.Path]::GetTempPath()) ("textforge_update_" + [guid]::NewGuid().ToString("N"))
+$workDir = Join-Path ([System.IO.Path]::GetTempPath()) ("yeehe_update_" + [guid]::NewGuid().ToString("N"))
 $zipPath = Join-Path $workDir "update.zip"
 $extractDir = Join-Path $workDir "extract"
 New-Item -ItemType Directory -Path $workDir -Force | Out-Null
 New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
 
 try {
-  $host.UI.RawUI.WindowTitle = "文本预处理工具 更新中"
+  $host.UI.RawUI.WindowTitle = "译禾工具合集 更新中"
   Write-Host "==============================================" -ForegroundColor DarkGray
-  Write-Host "文本预处理工具 正在更新" -ForegroundColor Yellow
+  Write-Host "译禾工具合集 正在更新" -ForegroundColor Yellow
   Write-Host "请不要关闭此窗口，更新完成后会自动重新打开程序。" -ForegroundColor Gray
   Write-Host "==============================================" -ForegroundColor DarkGray
   Write-Host ""
@@ -553,7 +553,7 @@ def start_app_update(download_url: str) -> dict:
     exe_path = Path(sys.executable).resolve()
     bundle_root = app_root.parent if exe_path.parent.name.lower() == "program" else app_root
     launcher_name = "start_webui.bat"
-    script_dir = Path(tempfile.mkdtemp(prefix="textforge_update_"))
+    script_dir = Path(tempfile.mkdtemp(prefix="yeehe_update_"))
     script_path = script_dir / "run_update.ps1"
     # Windows PowerShell 5.x reads UTF-8 scripts reliably when BOM is present.
     # Without BOM, non-ASCII text in the updater script can be misparsed.

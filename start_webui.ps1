@@ -18,7 +18,7 @@ Write-Host ""
 Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoProfile", "-Command", "Start-Sleep -Seconds 2; Start-Process 'http://127.0.0.1:8765'"
 
 try {
-    $packagedExe = Join-Path $PSScriptRoot "program\\AI_Term_Extractor_WebUI.exe"
+    $packagedExe = Join-Path $PSScriptRoot "program\\Yeehe_Toolkit_Suite.exe"
     if (Test-Path -LiteralPath $packagedExe) {
         & $packagedExe
     }

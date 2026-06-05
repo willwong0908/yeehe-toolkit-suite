@@ -19,8 +19,8 @@ echo.
 
 start "" powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 2; Start-Process 'http://127.0.0.1:8765'"
 
-if exist "%~dp0program\AI_Term_Extractor_WebUI.exe" (
-  "%~dp0program\AI_Term_Extractor_WebUI.exe"
+if exist "%~dp0program\Yeehe_Toolkit_Suite.exe" (
+  "%~dp0program\Yeehe_Toolkit_Suite.exe"
 ) else (
   python term_extractor_app\web_app.py
 )

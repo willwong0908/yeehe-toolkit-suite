@@ -46,7 +46,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="AI_Term_Extractor_WebUI",
+    name="Yeehe_Toolkit_Suite",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -66,5 +66,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="AI_Term_Extractor_WebUI",
+    name="Yeehe_Toolkit_Suite",
 )
