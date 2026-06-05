@@ -2414,7 +2414,7 @@ INDEX_HTML = """<!doctype html>
               <h3>任务操作</h3>
               <p>确认读取结果后，即可开始审校任务。</p>
             </div>
-            <div class="grid two">
+            <div class="grid two hidden">
               <label>原文语种<input id="sourceLanguageInput" placeholder="例如 English" /></label>
               <label>译文语种<input id="targetLanguageInput" placeholder="例如 简体中文" /></label>
             </div>
@@ -2666,7 +2666,7 @@ INDEX_HTML = """<!doctype html>
           <input id="mappingTargetLanguageInput" type="text" />
         </div>
       </div>
-      <div class="grid two">
+      <div class="grid two hidden">
         <div class="field">
           <label for="excelMappingPresetSelect">映射预设</label>
           <select id="excelMappingPresetSelect"></select>
@@ -2676,7 +2676,7 @@ INDEX_HTML = """<!doctype html>
           <input id="excelMappingPresetNameInput" type="text" placeholder="输入预设名称" />
         </div>
       </div>
-      <div class="actions">
+      <div class="actions hidden">
         <button id="applyExcelMappingPresetButton" class="secondary" type="button">应用预设</button>
         <button id="saveExcelMappingPresetButton" class="secondary" type="button">保存预设</button>
         <button id="deleteExcelMappingPresetButton" class="danger" type="button">删除预设</button>
@@ -2746,6 +2746,7 @@ body {
   font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
   font-size: 15px;
 }
+.hidden { display: none !important; }
 .shell { display: grid; grid-template-columns: 260px 1fr; min-height: 100vh; }
 .sidebar {
   padding: 28px 22px;
@@ -3014,7 +3015,32 @@ input, select {
 .secret-field input { min-width: 0; }
 .mini-button { min-height: 42px; padding: 0 14px; background: #e6edf5; color: #25364c; border: 1px solid #cbd8e6; }
 .check { display: flex; align-items: center; gap: 9px; color: var(--ink); }
-.check input { width: 18px; min-height: 18px; }
+.check input[type="checkbox"],
+.check-line input[type="checkbox"],
+.mapping-source,
+.directional-item input[type="checkbox"],
+.pattern-table input[type="checkbox"],
+.scope-item input[type="checkbox"],
+#crossExcelHeaderList input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  margin: 0;
+  accent-color: var(--primary);
+}
+.check-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #f7fafc;
+  color: var(--ink);
+  font-weight: 700;
+}
 .actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
 .action-row-compact {
   margin-top: 12px;
@@ -3427,7 +3453,7 @@ button:disabled { opacity: .58; cursor: not-allowed; }
   border-radius: 12px;
   background: #f7fafc;
 }
-.directional-item input[type="checkbox"] { width: 18px; min-height: 18px; margin: 0; }
+.directional-item input[type="checkbox"] { margin: 0; }
 .sheet-tabs {
   display: flex;
   gap: 8px;
@@ -4121,6 +4147,10 @@ function renderAiReviewForbiddenTemplateOptions() {
   });
 }
 
+function clearAiReviewTaskHint() {
+  $("reviewTaskHint").textContent = "";
+}
+
 function summarizeAiReviewExcelMapping(mapping) {
   const sheets = Array.isArray(mapping?.sheets) ? mapping.sheets : [];
   const count = sheets.reduce((total, sheet) => total + Number((sheet.mappings || []).length || 0), 0);
@@ -4186,6 +4216,7 @@ function renderAiReviewExcelSheetTabs() {
     button.className = `sheet-tab ${sheetName === aiReviewActiveSheetName ? "active" : ""}`.trim();
     button.textContent = String(sheetName || "");
     button.addEventListener("click", () => {
+      clearAiReviewTaskHint();
       syncAiReviewActiveSheetMapping();
       aiReviewActiveSheetName = sheetName;
       renderAiReviewExcelMappingDialog();
@@ -4234,10 +4265,12 @@ function renderAiReviewExcelMappingColumns() {
     const categoryInput = row.querySelector(".mapping-info-category");
     categoryInput.disabled = infoSelect.disabled || !infoSelect.value;
     row.querySelector(".mapping-source").addEventListener("change", () => {
+      clearAiReviewTaskHint();
       syncAiReviewActiveSheetMapping();
       renderAiReviewExcelMappingDialog();
     });
     targetSelect.addEventListener("change", () => {
+      clearAiReviewTaskHint();
       if (targetSelect.value !== "") {
         infoSelect.value = "";
         categoryInput.disabled = true;
@@ -4245,6 +4278,7 @@ function renderAiReviewExcelMappingColumns() {
       syncAiReviewActiveSheetMapping();
     });
     infoSelect.addEventListener("change", () => {
+      clearAiReviewTaskHint();
       if (infoSelect.value !== "") {
         targetSelect.value = "";
         categoryInput.disabled = false;
@@ -4253,7 +4287,10 @@ function renderAiReviewExcelMappingColumns() {
       }
       syncAiReviewActiveSheetMapping();
     });
-    categoryInput.addEventListener("input", syncAiReviewActiveSheetMapping);
+    categoryInput.addEventListener("input", () => {
+      clearAiReviewTaskHint();
+      syncAiReviewActiveSheetMapping();
+    });
     container.appendChild(row);
   });
 }
@@ -4351,9 +4388,9 @@ async function openAiReviewExcelMappingDialog() {
   if (!aiReviewBatch?.id || !aiReviewSheetNames.length) {
     throw new Error("请先读取 Excel 文件");
   }
+  clearAiReviewTaskHint();
   $("mappingSourceLanguageInput").value = $("sourceLanguageInput").value || "";
   $("mappingTargetLanguageInput").value = $("targetLanguageInput").value || "";
-  await loadAiReviewExcelMappingPresets();
   renderAiReviewExcelMappingDialog();
   $("excelMappingDialog").showModal();
 }
@@ -4378,6 +4415,7 @@ async function applyAiReviewExcelMapping() {
   $("targetLanguageInput").value = mapping.target_language || "";
   $("excelMappingSummary").textContent = summarizeAiReviewExcelMapping(mapping);
   $("excelMappingDialog").close();
+  clearAiReviewTaskHint();
   renderAiReviewBatch(data);
 }
 
