@@ -20,11 +20,9 @@ from pydantic import BaseModel, ConfigDict
 
 if __package__:
     from .ai_review.cache_service import (
-        clear_read_cache as clear_ai_review_read_cache,
         create_batch as create_ai_review_batch,
         get_batch as get_ai_review_batch,
         get_batch_items as get_ai_review_batch_items,
-        get_latest_ready_batch as get_latest_ai_review_batch,
         open_directory as open_ai_review_directory,
         replace_batch_items as replace_ai_review_batch_items,
         save_upload_file as save_ai_review_upload_file,
@@ -105,11 +103,9 @@ else:
     if str(package_root) not in sys.path:
         sys.path.insert(0, str(package_root))
     from term_extractor_app.ai_review.cache_service import (
-        clear_read_cache as clear_ai_review_read_cache,
         create_batch as create_ai_review_batch,
         get_batch as get_ai_review_batch,
         get_batch_items as get_ai_review_batch_items,
-        get_latest_ready_batch as get_latest_ai_review_batch,
         open_directory as open_ai_review_directory,
         replace_batch_items as replace_ai_review_batch_items,
         save_upload_file as save_ai_review_upload_file,
@@ -864,7 +860,7 @@ def _ai_review_excel_upload_response(
         metadata_with_path["original_file_path"] = original_file_path
     return {
         "ok": True,
-        "message": "Excel 文件已读取，请设置 Excel 映射。",
+        "message": "Excel 文件已读取，请导入文本。",
         "file_type": "excel",
         "batch_id": batch_id,
         "filename": filename,
@@ -1494,25 +1490,6 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
             raise HTTPException(status_code=500, detail="读取失败：{0}".format(exc)) from exc
-
-    @app.get("/api/ai-review/cache/latest")
-    async def ai_review_latest_cache():
-        batch = get_latest_ai_review_batch()
-        if not batch:
-            return {"has_cache": False}
-        return {"has_cache": True, **_ai_review_batch_response(batch["id"], "发现上一批读取缓存")}
-
-    @app.post("/api/ai-review/cache/use")
-    async def ai_review_use_cache():
-        batch = get_latest_ai_review_batch()
-        if not batch:
-            raise HTTPException(status_code=404, detail="没有可用读取缓存")
-        return _ai_review_batch_response(batch["id"], "已使用上一批读取缓存")
-
-    @app.post("/api/ai-review/cache/clear")
-    async def ai_review_clear_cache():
-        clear_ai_review_read_cache()
-        return {"ok": True, "message": "读取缓存已清空"}
 
     @app.get("/api/ai-review/ai-settings")
     async def ai_review_ai_settings():
@@ -2359,13 +2336,14 @@ INDEX_HTML = """<!doctype html>
               <p>支持 Excel 与 XLIFF。读取后可预览前 5 条并开始审校。</p>
             </div>
             <div class="grid two">
-              <label>当前文件
-                <span class="secret-field">
-                  <input id="reviewFilePath" placeholder="请选择待审校文件" readonly />
+              <div class="field">
+                <span class="field-label">当前文件</span>
+                <div class="file-card-row">
+                  <div id="reviewFilePath" class="file-card empty">请选择待审校文件</div>
                   <button id="chooseReviewFileButton" class="mini-button" type="button">选择文件</button>
                   <input id="reviewFileInput" type="file" accept=".xlsx,.xlsm,.xlf,.xliff" hidden />
-                </span>
-              </label>
+                </div>
+              </div>
               <div class="cross-summary-box">
                 <span>读取状态</span>
                 <strong id="reviewBatchCount">0</strong>
@@ -2373,10 +2351,7 @@ INDEX_HTML = """<!doctype html>
               </div>
             </div>
             <div class="actions">
-              <button id="openReviewFileButton" class="secondary" type="button" disabled>打开文件</button>
-              <button id="openExcelMappingButton" class="secondary" type="button" disabled>设置 Excel 映射</button>
-              <button id="useReviewCacheButton" class="secondary" type="button">使用上次缓存</button>
-              <button id="clearReviewCacheButton" class="secondary" type="button">清空缓存</button>
+              <button id="openExcelMappingButton" class="secondary" type="button" disabled>导入文本</button>
             </div>
             <p id="excelMappingSummary" class="hint"></p>
           </section>
@@ -2386,7 +2361,7 @@ INDEX_HTML = """<!doctype html>
           <section class="card">
             <div class="card-title">
               <h3>读取预览</h3>
-              <p>默认展示前 5 条，便于确认原文和译文是否对应。</p>
+              <p>预览前 5 条，检查原文和译文是否对应。</p>
             </div>
             <div class="pattern-table-wrap">
               <table class="pattern-table">
@@ -2412,7 +2387,7 @@ INDEX_HTML = """<!doctype html>
           <section class="card">
             <div class="card-title">
               <h3>任务操作</h3>
-              <p>确认读取结果后，即可开始审校任务。</p>
+              <p>确认预览无误后开始审校。</p>
             </div>
             <div class="grid two hidden">
               <label>原文语种<input id="sourceLanguageInput" placeholder="例如 English" /></label>
@@ -2471,11 +2446,11 @@ INDEX_HTML = """<!doctype html>
       </section>
 
       <section id="aiReviewSettingsPage" class="page-section">
-        <div class="grid dashboard-grid">
+        <div class="grid one">
           <section class="card">
             <div class="card-title">
               <h3>审校方式</h3>
-              <p>这里只管理审校方式、模板与思考深度，不放任务读取内容。</p>
+              <p>选择审校模式、提示词模板和模型思考深度。</p>
             </div>
             <div class="actions review-toggle-row">
               <label class="check-line"><input id="enableAiReview" type="checkbox" checked /><span>启用 AI 审校</span></label>
@@ -2487,26 +2462,14 @@ INDEX_HTML = """<!doctype html>
               <label id="directionalTemplatePanel" class="hidden">定向审校模板<select id="directionalTemplateSelect"></select></label>
             </div>
             <div class="actions">
-              <button id="openModelSettingsFromReviewButton" class="secondary" type="button">模型设置</button>
-              <button id="testReviewModelButton" class="secondary" type="button">测试模型</button>
-              <button id="saveReviewSettingsButton" class="secondary" type="button">保存设置</button>
-            </div>
-            <span id="reviewSettingsHint" class="hint"></span>
-          </section>
-
-          <section class="card">
-            <div class="card-title">
-              <h3>模板管理</h3>
-              <p>普通审校和定向审校的模板都在这里维护。</p>
-            </div>
-            <div class="actions">
               <button id="editPromptButton" class="secondary" type="button">编辑提示词</button>
               <button id="editDirectionalButton" class="secondary" type="button">编辑定向</button>
             </div>
             <div class="notice-list">
-              <div>启用定向审校后，会按定向模板中的项目输出结果列。</div>
-              <div>模型连接仍共用顶部的模型设置。</div>
+              <div>定向审校会按所选项目生成结果列。</div>
+              <div>模型连接请在“模型设置”中调整。</div>
             </div>
+            <span id="reviewSettingsHint" class="hint"></span>
           </section>
         </div>
       </section>
@@ -2526,7 +2489,6 @@ INDEX_HTML = """<!doctype html>
             </div>
             <div class="actions">
               <button id="editForbiddenButton" class="secondary" type="button">编辑禁用词</button>
-              <button id="saveForbiddenSettingsButton" class="secondary" type="button">保存设置</button>
             </div>
             <span id="reviewForbiddenHint" class="hint"></span>
           </section>
@@ -3013,6 +2975,37 @@ input, select {
 }
 .secret-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
 .secret-field input { min-width: 0; }
+.field-label {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+.file-card-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: stretch;
+}
+.file-card {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 10px 13px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #f8fbfd;
+  color: var(--ink);
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.file-card.empty {
+  color: var(--muted);
+  font-weight: 600;
+}
 .mini-button { min-height: 42px; padding: 0 14px; background: #e6edf5; color: #25364c; border: 1px solid #cbd8e6; }
 .check { display: flex; align-items: center; gap: 9px; color: var(--ink); }
 .check input[type="checkbox"],
@@ -4063,6 +4056,13 @@ function renderAiReviewPreview(items) {
   });
 }
 
+function setAiReviewFileCard(text = "") {
+  const card = $("reviewFilePath");
+  const displayText = String(text || "").trim();
+  card.textContent = displayText || "请选择待审校文件";
+  card.classList.toggle("empty", !displayText);
+}
+
 function initializeAiReviewExcelMapping(data) {
   aiReviewSheetNames = Array.isArray(data?.sheet_names) ? data.sheet_names : [];
   aiReviewColumnsBySheet = data?.columns_by_sheet || {};
@@ -4080,9 +4080,8 @@ function renderAiReviewBatch(data) {
   const isExcel = String(batch?.file_type || "") === "excel";
   $("reviewBatchCount").textContent = Number(batch?.item_count || 0);
   $("reviewFileHint").textContent = data?.message || "尚未读取文件。";
-  $("openReviewFileButton").disabled = !batch?.metadata?.original_file_path;
   $("openExcelMappingButton").disabled = !isExcel;
-  $("reviewFilePath").value = String(batch?.metadata?.original_file_path || "");
+  setAiReviewFileCard(batch?.metadata?.original_file_path || batch?.filename || "");
   $("sourceLanguageInput").value = String(batch?.source_language || $("sourceLanguageInput").value || "");
   $("targetLanguageInput").value = String(batch?.target_language || $("targetLanguageInput").value || "");
   const excelMapping = batch?.metadata?.excel_mapping || null;
@@ -4635,7 +4634,7 @@ async function saveForbiddenTemplateFromDialog() {
 
 function renderAiReviewResults(task, results) {
   renderAiReviewResultHead(task || {});
-  const outputFile = String(task?.output_file || "");
+  const outputFile = String(task?.output_path || task?.output_file || "");
   $("reviewProgress").textContent = String(task?.status_label || task?.status || "尚未开始");
   $("outputPath").textContent = outputFile || "暂无输出";
   $("outputPanel").classList.toggle("hidden", !outputFile);
@@ -4761,7 +4760,7 @@ async function uploadAiReviewFile(file) {
     return;
   }
   resetAiReviewTaskView();
-  $("reviewFilePath").value = file.name || "";
+  setAiReviewFileCard(file.name || "");
   $("reviewFileHint").textContent = "正在读取文件...";
   const formData = new FormData();
   formData.append("file", file);
@@ -4823,69 +4822,11 @@ function resetAiReviewTaskView() {
   $("reviewTaskHint").textContent = "";
 }
 
-async function useAiReviewCache() {
-  const data = await api("/api/ai-review/cache/use", {
-    method: "POST",
-    body: "{}",
-  });
-  renderAiReviewBatch(data);
-}
-
-async function clearAiReviewCache() {
-  await api("/api/ai-review/cache/clear", {
-    method: "POST",
-    body: "{}",
-  });
-  aiReviewBatch = null;
-  aiReviewSheetNames = [];
-  aiReviewColumnsBySheet = {};
-  aiReviewExcelMappingState = {};
-  aiReviewActiveSheetName = "";
-  aiReviewTaskId = "";
-  aiReviewLogCursor = 0;
-  if (aiReviewTaskPoller) {
-    window.clearInterval(aiReviewTaskPoller);
-    aiReviewTaskPoller = null;
-  }
-  $("reviewBatchCount").textContent = "0";
-  $("reviewFileHint").textContent = "读取缓存已清空";
-  $("reviewFilePath").value = "";
-  $("excelMappingSummary").textContent = "";
-  $("openExcelMappingButton").disabled = true;
-  $("reviewLogList").innerHTML = "";
-  $("reviewProgress").textContent = "尚未开始";
-  $("outputPanel").classList.add("hidden");
-  $("outputPath").textContent = "暂无输出";
-  renderAiReviewResultHead({});
-  renderAiReviewPreview([]);
-  $("reviewResultBody").innerHTML = '<tr><td colspan="6" class="empty-cell">暂无审校结果</td></tr>';
-}
-
-async function openAiReviewFile() {
-  const filePath = String(aiReviewBatch?.metadata?.original_file_path || "");
-  if (!filePath) {
-    return;
-  }
-  await api("/api/ai-review/file/open", {
-    method: "POST",
-    body: JSON.stringify({ file_path: filePath }),
-  });
-}
-
-async function testAiReviewModel() {
-  const data = await api("/api/ai-review/ai/test", {
-    method: "POST",
-    body: "{}",
-  });
-  $("reviewSettingsHint").textContent = `${data.message}：${data.model || ""}`;
-}
-
 async function startAiReviewTask() {
   if (!aiReviewBatch?.id) {
     $("reviewTaskHint").textContent = "请先读取文件";
     return;
   }
-  await saveAiReviewSettings("reviewTaskHint", "正在保存审校设置...");
   const mode = $("enableAiReview").checked
     ? ($("enableDirectionalReview").checked ? "directional" : "normal")
     : "normal";
@@ -4961,14 +4902,6 @@ async function openAiReviewOutputFile() {
     method: "POST",
     body: JSON.stringify({ file_path: filePath }),
   });
-}
-
-async function loadLatestAiReviewCache() {
-  const data = await api("/api/ai-review/cache/latest");
-  if (!data.has_cache) {
-    return;
-  }
-  renderAiReviewBatch(data);
 }
 
 function setCrossExcelOutput(filePath, message = "") {
@@ -5199,19 +5132,6 @@ async function resetSinglePromptTemplate(key) {
   $("promptTemplateHint").textContent = "该提示词已恢复默认";
   setTimeout(() => ($("promptTemplateHint").textContent = ""), 1800);
   renderPromptTemplates();
-}
-
-async function saveAiReviewSettings(hintId = "reviewSettingsHint", message = "审校设置已保存") {
-  await api("/api/settings", { method: "POST", body: JSON.stringify(reviewSettingsPayload()) });
-  const hint = $(hintId);
-  if (hint) {
-    hint.textContent = message;
-    setTimeout(() => {
-      if (hint.textContent === message) {
-        hint.textContent = "";
-      }
-    }, 1800);
-  }
 }
 
 function renderAsciiPatterns() {
@@ -6097,15 +6017,6 @@ $("reviewFileInput").addEventListener("change", () => {
 $("openExcelMappingButton").addEventListener("click", () => openAiReviewExcelMappingDialog().catch((error) => {
   $("reviewTaskHint").textContent = error.message;
 }));
-$("useReviewCacheButton").addEventListener("click", () => useAiReviewCache().catch((error) => {
-  $("reviewTaskHint").textContent = error.message;
-}));
-$("clearReviewCacheButton").addEventListener("click", () => clearAiReviewCache().catch((error) => {
-  $("reviewTaskHint").textContent = error.message;
-}));
-$("openReviewFileButton").addEventListener("click", () => openAiReviewFile().catch((error) => {
-  $("reviewTaskHint").textContent = error.message;
-}));
 $("startReviewButton").addEventListener("click", () => startAiReviewTask().catch((error) => {
   $("reviewTaskHint").textContent = error.message;
   setAiReviewTaskStatus({
@@ -6118,22 +6029,6 @@ $("startReviewButton").addEventListener("click", () => startAiReviewTask().catch
 }));
 $("openReviewSettingsButton").addEventListener("click", () => setPage("aiReviewSettingsPage"));
 $("openReviewForbiddenButton").addEventListener("click", () => setPage("aiReviewForbiddenPage"));
-$("saveReviewSettingsButton").addEventListener("click", () => saveAiReviewSettings().catch((error) => {
-  $("reviewSettingsHint").textContent = error.message;
-}));
-$("saveForbiddenSettingsButton").addEventListener("click", () => {
-  const hint = $("reviewForbiddenHint");
-  hint.textContent = "禁用词设置会在开始审校时自动使用当前选择。";
-  setTimeout(() => {
-    if (hint.textContent === "禁用词设置会在开始审校时自动使用当前选择。") {
-      hint.textContent = "";
-    }
-  }, 1800);
-});
-$("testReviewModelButton").addEventListener("click", () => testAiReviewModel().catch((error) => {
-  $("reviewSettingsHint").textContent = error.message;
-}));
-$("openModelSettingsFromReviewButton").addEventListener("click", () => setPage("modelSettingsPage"));
 $("enableAiReview").addEventListener("change", updateAiReviewModeVisibility);
 $("enableDirectionalReview").addEventListener("change", updateAiReviewModeVisibility);
 $("editPromptButton").addEventListener("click", () => openAiReviewPromptDialog().catch((error) => {
@@ -6249,7 +6144,6 @@ Promise.all([
   loadAiReviewPromptTemplates(),
   loadAiReviewDirectionalTemplates(),
   loadAiReviewForbiddenTemplates(),
-  loadLatestAiReviewCache(),
 ]).then(refreshStatus).catch((error) => {
   $("statusMessage").textContent = error.message;
 });

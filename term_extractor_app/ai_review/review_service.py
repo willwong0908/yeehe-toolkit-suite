@@ -252,7 +252,6 @@ def _run_review_task(task_id: str) -> None:
             request_items.append({**item, "cache_key": cache_key})
 
         _update_task(task_id, cached_count=0, completed_count=0)
-        _add_log(task_id, "info", f"AI 结果缓存已停用，本次将请求 {len(request_items)} 条")
 
         packages = _build_packages(request_items, max_chars)
 
