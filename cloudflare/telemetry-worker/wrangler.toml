@@ -2,6 +2,9 @@ name = "yeehe-telemetry"
 main = "src/index.js"
 compatibility_date = "2026-06-08"
 
+[triggers]
+crons = ["*/30 * * * *"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "yeehe-telemetry"

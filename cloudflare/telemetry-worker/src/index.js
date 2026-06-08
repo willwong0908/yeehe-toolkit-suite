@@ -1,9 +1,24 @@
 const EVENT_NAME_RE = /^[a-z0-9_.-]{3,80}$/;
-const FEEDBACK_TABLE_NAME = "反馈";
-const FIELD_FEEDBACK = "反馈";
-const FIELD_DATE = "日期";
-const FIELD_SCREENSHOT = "截图";
-const FIELD_LOG = "日志";
+
+const FEEDBACK_APP_NAME = "\u8bd1\u79be\u5de5\u5177\u5408\u96c6\u53cd\u9988";
+const FEEDBACK_FIELD_TEXT = "\u53cd\u9988";
+const FEEDBACK_FIELD_DATE = "\u65e5\u671f";
+const FEEDBACK_FIELD_SCREENSHOT = "\u622a\u56fe";
+const FEEDBACK_FIELD_LOG = "\u65e5\u5fd7";
+
+const STATS_TABLE_NAME = "\u4f7f\u7528\u6b21\u6570\u7edf\u8ba1";
+const STATS_FIELD_KEY = "\u952e";
+const STATS_FIELD_DATE = "\u65e5\u671f";
+const STATS_FIELD_EVENT = "\u7edf\u8ba1\u9879";
+const STATS_FIELD_VERSION = "\u7248\u672c";
+const STATS_FIELD_COUNT = "\u6b21\u6570";
+
+const STATE_FEEDBACK_APP_TOKEN = "feedback_bitable_app_token";
+const STATE_FEEDBACK_TABLE_ID = "feedback_bitable_table_id";
+const STATE_STATS_TABLE_ID = "telemetry_stats_table_id";
+
+const CHUNK_CREATE_LIMIT = 1000;
+const CHUNK_DELETE_LIMIT = 500;
 
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -22,6 +37,18 @@ function utcDate(tsSeconds) {
 
 function utcNow() {
   return new Date().toISOString();
+}
+
+function startOfUtcDay(dateText) {
+  return Date.parse(`${String(dateText || "").trim()}T00:00:00.000Z`);
+}
+
+function chunkArray(items, size) {
+  const chunks = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function normalizeEvents(body) {
@@ -88,28 +115,11 @@ async function writeState(env, key, value) {
   ).bind(key, String(value), utcNow()).run();
 }
 
-async function feishuJson(env, path, options = {}) {
-  const token = await getTenantAccessToken(env);
-  const response = await fetch(`https://open.feishu.cn${path}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      ...(options.headers || {}),
-    },
-  });
-  const data = await response.json();
-  if (!response.ok || Number(data?.code || 0) !== 0) {
-    const message = String(data?.msg || data?.message || `Feishu request failed: ${response.status}`);
-    throw new Error(message);
-  }
-  return data.data || {};
-}
-
 async function getTenantAccessToken(env) {
   const appId = String(env.FEISHU_APP_ID || "").trim();
   const appSecret = String(env.FEISHU_APP_SECRET || "").trim();
   if (!appId || !appSecret) {
-    throw new Error("Feedback service is not configured.");
+    throw new Error("Feishu service is not configured.");
   }
   const response = await fetch("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal", {
     method: "POST",
@@ -126,17 +136,51 @@ async function getTenantAccessToken(env) {
   return String(data.tenant_access_token);
 }
 
-async function listFields(env, appToken, tableId) {
-  const data = await feishuJson(
+async function createFeishuSession(env) {
+  return {
     env,
+    token: await getTenantAccessToken(env),
+  };
+}
+
+async function feishuJson(session, path, options = {}) {
+  const response = await fetch(`https://open.feishu.cn${path}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${session.token}`,
+      ...(options.headers || {}),
+    },
+  });
+  const data = await response.json();
+  if (!response.ok || Number(data?.code || 0) !== 0) {
+    const message = String(data?.msg || data?.message || `Feishu request failed: ${response.status}`);
+    throw new Error(message);
+  }
+  return data.data || {};
+}
+
+async function listFields(session, appToken, tableId) {
+  const data = await feishuJson(
+    session,
     `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/fields?page_size=100`,
     { method: "GET" }
   );
   return Array.isArray(data.items) ? data.items : [];
 }
 
-async function updateField(env, appToken, tableId, fieldId, fieldName, type) {
-  await feishuJson(env, `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/fields/${fieldId}`, {
+async function createField(session, appToken, tableId, fieldName, type) {
+  await feishuJson(session, `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/fields`, {
+    method: "POST",
+    headers: { "content-type": "application/json; charset=utf-8" },
+    body: JSON.stringify({
+      field_name: fieldName,
+      type,
+    }),
+  });
+}
+
+async function updateField(session, appToken, tableId, fieldId, fieldName, type) {
+  await feishuJson(session, `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/fields/${fieldId}`, {
     method: "PUT",
     headers: { "content-type": "application/json; charset=utf-8" },
     body: JSON.stringify({
@@ -146,108 +190,220 @@ async function updateField(env, appToken, tableId, fieldId, fieldName, type) {
   });
 }
 
-async function createField(env, appToken, tableId, fieldName, type) {
-  await feishuJson(env, `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/fields`, {
-    method: "POST",
-    headers: { "content-type": "application/json; charset=utf-8" },
-    body: JSON.stringify({
-      field_name: fieldName,
-      type,
-    }),
-  });
-}
-
-async function deleteField(env, appToken, tableId, fieldId) {
-  await feishuJson(env, `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/fields/${fieldId}`, {
+async function deleteField(session, appToken, tableId, fieldId) {
+  await feishuJson(session, `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/fields/${fieldId}`, {
     method: "DELETE",
   });
 }
 
-async function createBitable(env) {
-  const appData = await feishuJson(env, "/open-apis/bitable/v1/apps", {
-    method: "POST",
-    headers: { "content-type": "application/json; charset=utf-8" },
-    body: JSON.stringify({ name: "译禾工具合集反馈" }),
+async function listTables(session, appToken) {
+  const data = await feishuJson(session, `/open-apis/bitable/v1/apps/${appToken}/tables?page_size=100`, {
+    method: "GET",
   });
-  const appToken = String(appData?.app?.app_token || "").trim();
-  const tableId = String(appData?.app?.default_table_id || "").trim();
-  if (!appToken || !tableId) {
-    throw new Error("Failed to create feedback bitable.");
-  }
-  await writeState(env, "feedback_bitable_app_token", appToken);
-  await writeState(env, "feedback_bitable_table_id", tableId);
-  return { appToken, tableId };
+  return Array.isArray(data.items) ? data.items : [];
 }
 
-async function ensureFeedbackTable(env) {
-  let appToken = await readState(env, "feedback_bitable_app_token");
-  let tableId = await readState(env, "feedback_bitable_table_id");
-  if (!appToken || !tableId) {
-    const created = await createBitable(env);
-    appToken = created.appToken;
-    tableId = created.tableId;
-  }
+async function createTable(session, appToken, name) {
+  const data = await feishuJson(session, `/open-apis/bitable/v1/apps/${appToken}/tables`, {
+    method: "POST",
+    headers: { "content-type": "application/json; charset=utf-8" },
+    body: JSON.stringify({
+      table: { name },
+    }),
+  });
+  return String(data?.table_id || "").trim();
+}
 
-  let fields = await listFields(env, appToken, tableId);
-  const byName = new Map(fields.map((field) => [String(field.field_name || ""), field]));
+async function deleteTable(session, appToken, tableId) {
+  await feishuJson(session, `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}`, {
+    method: "DELETE",
+  });
+}
 
-  let feedbackField = byName.get(FIELD_FEEDBACK);
-  if (!feedbackField) {
-    const primaryText = fields.find((field) => Boolean(field.is_primary) && Number(field.type) === 1);
-    if (primaryText) {
-      await updateField(env, appToken, tableId, String(primaryText.field_id), FIELD_FEEDBACK, 1);
-    } else {
-      const textField = fields.find((field) => Number(field.type) === 1);
-      if (textField) {
-        await updateField(env, appToken, tableId, String(textField.field_id), FIELD_FEEDBACK, 1);
-      } else {
-        await createField(env, appToken, tableId, FIELD_FEEDBACK, 1);
-      }
+async function listRecords(session, appToken, tableId) {
+  const records = [];
+  let pageToken = "";
+  while (true) {
+    const params = new URLSearchParams({ page_size: "500" });
+    if (pageToken) {
+      params.set("page_token", pageToken);
     }
-    fields = await listFields(env, appToken, tableId);
-  }
-
-  if (!fields.find((field) => String(field.field_name || "") === FIELD_DATE)) {
-    const dateField = fields.find((field) => Number(field.type) === 5);
-    if (dateField) {
-      await updateField(env, appToken, tableId, String(dateField.field_id), FIELD_DATE, 5);
-    } else {
-      await createField(env, appToken, tableId, FIELD_DATE, 5);
-    }
-    fields = await listFields(env, appToken, tableId);
-  }
-
-  if (!fields.find((field) => String(field.field_name || "") === FIELD_SCREENSHOT)) {
-    const attachmentField = fields.find((field) => Number(field.type) === 17);
-    if (attachmentField) {
-      await updateField(env, appToken, tableId, String(attachmentField.field_id), FIELD_SCREENSHOT, 17);
-    } else {
-      await createField(env, appToken, tableId, FIELD_SCREENSHOT, 17);
-    }
-    fields = await listFields(env, appToken, tableId);
-  }
-
-  if (!fields.find((field) => String(field.field_name || "") === FIELD_LOG)) {
-    const remainingAttachment = fields.find(
-      (field) => Number(field.type) === 17 && String(field.field_name || "") !== FIELD_SCREENSHOT
+    const data = await feishuJson(
+      session,
+      `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/records?${params.toString()}`,
+      { method: "GET" }
     );
-    if (remainingAttachment) {
-      await updateField(env, appToken, tableId, String(remainingAttachment.field_id), FIELD_LOG, 17);
-    } else {
-      await createField(env, appToken, tableId, FIELD_LOG, 17);
+    records.push(...(Array.isArray(data.items) ? data.items : []));
+    if (!data.has_more || !data.page_token) {
+      break;
     }
-    fields = await listFields(env, appToken, tableId);
+    pageToken = String(data.page_token || "");
   }
+  return records;
+}
 
-  const singleSelectField = fields.find((field) => String(field.field_name || "") === "单选" && Number(field.type) === 3);
-  if (singleSelectField) {
+async function deleteAllRecords(session, appToken, tableId) {
+  const records = await listRecords(session, appToken, tableId);
+  if (!records.length) {
+    return 0;
+  }
+  let deleted = 0;
+  for (const batch of chunkArray(records, CHUNK_DELETE_LIMIT)) {
+    await feishuJson(session, `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/records/batch_delete`, {
+      method: "POST",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify({
+        records: batch.map((item) => String(item.record_id || item.id || "")),
+      }),
+    });
+    deleted += batch.length;
+  }
+  return deleted;
+}
+
+async function batchCreateRecords(session, appToken, tableId, records) {
+  if (!records.length) {
+    return 0;
+  }
+  let created = 0;
+  for (const batch of chunkArray(records, CHUNK_CREATE_LIMIT)) {
+    await feishuJson(session, `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/records/batch_create`, {
+      method: "POST",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify({
+        records: batch.map((fields) => ({ fields })),
+      }),
+    });
+    created += batch.length;
+  }
+  return created;
+}
+
+async function ensurePrimaryTextField(session, appToken, tableId, targetName) {
+  const fields = await listFields(session, appToken, tableId);
+  const existing = fields.find((field) => String(field.field_name || "") === targetName);
+  if (existing) {
+    return;
+  }
+  const primaryText = fields.find((field) => Boolean(field.is_primary) && Number(field.type) === 1);
+  if (primaryText) {
+    await updateField(session, appToken, tableId, String(primaryText.field_id), targetName, 1);
+    return;
+  }
+  const textField = fields.find((field) => Number(field.type) === 1);
+  if (textField) {
+    await updateField(session, appToken, tableId, String(textField.field_id), targetName, 1);
+    return;
+  }
+  await createField(session, appToken, tableId, targetName, 1);
+}
+
+async function ensureNamedField(session, appToken, tableId, fieldName, type) {
+  const fields = await listFields(session, appToken, tableId);
+  if (fields.find((field) => String(field.field_name || "") === fieldName)) {
+    return;
+  }
+  await createField(session, appToken, tableId, fieldName, type);
+}
+
+async function cleanupLegacySelectField(session, appToken, tableId) {
+  const fields = await listFields(session, appToken, tableId);
+  const selectField = fields.find(
+    (field) => String(field.field_name || "") === "\u5355\u9009" && Number(field.type) === 3
+  );
+  if (selectField) {
     try {
-      await deleteField(env, appToken, tableId, String(singleSelectField.field_id));
+      await deleteField(session, appToken, tableId, String(selectField.field_id));
     } catch {
     }
   }
+}
 
+async function cleanupUnexpectedFields(session, appToken, tableId, allowedNames) {
+  const allowed = new Set(allowedNames.map((item) => String(item || "")));
+  const fields = await listFields(session, appToken, tableId);
+  for (const field of fields) {
+    const fieldName = String(field.field_name || "");
+    if (Boolean(field.is_primary)) {
+      continue;
+    }
+    if (allowed.has(fieldName)) {
+      continue;
+    }
+    try {
+      await deleteField(session, appToken, tableId, String(field.field_id || ""));
+    } catch {
+    }
+  }
+}
+
+async function createBitable(session, name) {
+  const appData = await feishuJson(session, "/open-apis/bitable/v1/apps", {
+    method: "POST",
+    headers: { "content-type": "application/json; charset=utf-8" },
+    body: JSON.stringify({ name }),
+  });
+  const appToken = String(appData?.app?.app_token || "").trim();
+  const tableId = String(appData?.app?.default_table_id || "").trim();
+  const appUrl = String(appData?.app?.url || "").trim();
+  if (!appToken || !tableId) {
+    throw new Error("Failed to create Feishu bitable.");
+  }
+  return { appToken, tableId, appUrl };
+}
+
+async function ensureFeedbackTable(session) {
+  const env = session.env;
+  let appToken = await readState(env, STATE_FEEDBACK_APP_TOKEN);
+  let tableId = await readState(env, STATE_FEEDBACK_TABLE_ID);
+  if (!appToken || !tableId) {
+    const created = await createBitable(session, FEEDBACK_APP_NAME);
+    appToken = created.appToken;
+    tableId = created.tableId;
+    await writeState(env, STATE_FEEDBACK_APP_TOKEN, appToken);
+    await writeState(env, STATE_FEEDBACK_TABLE_ID, tableId);
+  }
+
+  await ensurePrimaryTextField(session, appToken, tableId, FEEDBACK_FIELD_TEXT);
+  await ensureNamedField(session, appToken, tableId, FEEDBACK_FIELD_DATE, 5);
+  await ensureNamedField(session, appToken, tableId, FEEDBACK_FIELD_SCREENSHOT, 17);
+  await ensureNamedField(session, appToken, tableId, FEEDBACK_FIELD_LOG, 17);
+  await cleanupLegacySelectField(session, appToken, tableId);
   return { appToken, tableId };
+}
+
+async function ensureTelemetryStatsTable(session) {
+  const env = session.env;
+  const feedback = await ensureFeedbackTable(session);
+  const appToken = feedback.appToken;
+  const appUrl = `https://oy98p636wy.feishu.cn/base/${appToken}`;
+  let tableId = await readState(env, STATE_STATS_TABLE_ID);
+
+  const tables = await listTables(session, appToken);
+  const matchedTable = tables.find(
+    (item) => String(item.table_id || "") === tableId || String(item.name || "") === STATS_TABLE_NAME
+  );
+  if (matchedTable) {
+    tableId = String(matchedTable.table_id || "");
+  } else {
+    tableId = await createTable(session, appToken, STATS_TABLE_NAME);
+  }
+  await writeState(env, STATE_STATS_TABLE_ID, tableId);
+
+  await cleanupUnexpectedFields(session, appToken, tableId, [
+    STATS_FIELD_DATE,
+    STATS_FIELD_EVENT,
+    STATS_FIELD_VERSION,
+    STATS_FIELD_COUNT,
+  ]);
+  await ensurePrimaryTextField(session, appToken, tableId, STATS_FIELD_KEY);
+  await ensureNamedField(session, appToken, tableId, STATS_FIELD_DATE, 5);
+  await ensureNamedField(session, appToken, tableId, STATS_FIELD_EVENT, 1);
+  await ensureNamedField(session, appToken, tableId, STATS_FIELD_VERSION, 1);
+  await ensureNamedField(session, appToken, tableId, STATS_FIELD_COUNT, 2);
+  await cleanupLegacySelectField(session, appToken, tableId);
+
+  return { appToken, appUrl, tableId };
 }
 
 function decodeBase64Content(encoded) {
@@ -263,7 +419,7 @@ function decodeBase64Content(encoded) {
   return bytes;
 }
 
-async function uploadAttachment(env, appToken, attachment) {
+async function uploadAttachment(session, appToken, attachment) {
   if (!attachment?.content_base64) {
     return "";
   }
@@ -271,7 +427,6 @@ async function uploadAttachment(env, appToken, attachment) {
   if (!bytes) {
     return "";
   }
-  const token = await getTenantAccessToken(env);
   const form = new FormData();
   form.append("file_name", String(attachment.filename || "attachment.bin"));
   form.append("parent_type", "bitable_file");
@@ -285,7 +440,7 @@ async function uploadAttachment(env, appToken, attachment) {
   const response = await fetch("https://open.feishu.cn/open-apis/drive/v1/medias/upload_all", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${session.token}`,
     },
     body: form,
   });
@@ -306,30 +461,31 @@ function normalizeFeedbackBody(body) {
 }
 
 async function createFeedbackRecord(env, body) {
+  const session = await createFeishuSession(env);
   const normalized = normalizeFeedbackBody(body);
   if (!normalized.feedback) {
     throw new Error("Feedback text is required.");
   }
-  const { appToken, tableId } = await ensureFeedbackTable(env);
+  const { appToken, tableId } = await ensureFeedbackTable(session);
   const screenshotToken = normalized.screenshotAttachment
-    ? await uploadAttachment(env, appToken, normalized.screenshotAttachment)
+    ? await uploadAttachment(session, appToken, normalized.screenshotAttachment)
     : "";
   const logToken = normalized.logAttachment
-    ? await uploadAttachment(env, appToken, normalized.logAttachment)
+    ? await uploadAttachment(session, appToken, normalized.logAttachment)
     : "";
 
   const fields = {
-    [FIELD_FEEDBACK]: `版本：${normalized.appVersion}\n\n${normalized.feedback}`,
-    [FIELD_DATE]: Date.now(),
+    [FEEDBACK_FIELD_TEXT]: `Version: ${normalized.appVersion}\n\n${normalized.feedback}`,
+    [FEEDBACK_FIELD_DATE]: Date.now(),
   };
   if (screenshotToken) {
-    fields[FIELD_SCREENSHOT] = [{ file_token: screenshotToken }];
+    fields[FEEDBACK_FIELD_SCREENSHOT] = [{ file_token: screenshotToken }];
   }
   if (logToken) {
-    fields[FIELD_LOG] = [{ file_token: logToken }];
+    fields[FEEDBACK_FIELD_LOG] = [{ file_token: logToken }];
   }
 
-  await feishuJson(env, `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/records`, {
+  await feishuJson(session, `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/records`, {
     method: "POST",
     headers: { "content-type": "application/json; charset=utf-8" },
     body: JSON.stringify({ fields }),
@@ -342,12 +498,160 @@ async function createFeedbackRecord(env, body) {
   };
 }
 
+async function loadEventRows(env) {
+  const result = await env.DB.prepare(
+    `SELECT event_date, event_name, app_version, count
+     FROM event_counts
+     ORDER BY event_date DESC, event_name ASC, app_version ASC`
+  ).all();
+  return Array.isArray(result.results) ? result.results : [];
+}
+
+function buildDailyTotals(rows) {
+  const merged = new Map();
+  for (const row of rows) {
+    const date = String(row.event_date || "");
+    const count = Number(row.count || 0);
+    merged.set(date, (merged.get(date) || 0) + count);
+  }
+  return Array.from(merged.entries())
+    .map(([eventDate, totalCount]) => ({ event_date: eventDate, total_count: totalCount }))
+    .sort((left, right) => String(right.event_date).localeCompare(String(left.event_date)));
+}
+
+function buildEventTableRecords(rows) {
+  return rows.map((row) => ({
+    [STATS_FIELD_KEY]: `${row.event_date}::${row.event_name}::${row.app_version}`,
+    [STATS_FIELD_DATE]: startOfUtcDay(row.event_date),
+    [STATS_FIELD_EVENT]: String(row.event_name || ""),
+    [STATS_FIELD_VERSION]: String(row.app_version || ""),
+    [STATS_FIELD_COUNT]: Number(row.count || 0),
+  }));
+}
+
+function buildStatsTableRecords(eventRows, dailyRows) {
+  const records = [];
+  for (const row of dailyRows) {
+    records.push({
+      [STATS_FIELD_KEY]: `daily::${row.event_date}`,
+      [STATS_FIELD_DATE]: startOfUtcDay(row.event_date),
+      [STATS_FIELD_EVENT]: "\u5f53\u65e5\u4f7f\u7528\u603b\u91cf",
+      [STATS_FIELD_VERSION]: "",
+      [STATS_FIELD_COUNT]: Number(row.total_count || 0),
+    });
+  }
+  for (const row of eventRows) {
+    records.push({
+      [STATS_FIELD_KEY]: `${row.event_date}::${row.event_name}::${row.app_version}`,
+      [STATS_FIELD_DATE]: startOfUtcDay(row.event_date),
+      [STATS_FIELD_EVENT]: String(row.event_name || ""),
+      [STATS_FIELD_VERSION]: String(row.app_version || ""),
+      [STATS_FIELD_COUNT]: Number(row.count || 0),
+    });
+  }
+  return records;
+}
+
+async function listDashboards(session, appToken) {
+  const data = await feishuJson(session, `/open-apis/bitable/v1/apps/${appToken}/dashboards?page_size=100`, {
+    method: "GET",
+  }).catch(() => ({ items: [] }));
+  return Array.isArray(data.items) ? data.items : [];
+}
+
+async function syncTelemetryStats(env) {
+  const session = await createFeishuSession(env);
+  const rows = await loadEventRows(env);
+  const dailyRows = buildDailyTotals(rows);
+  const stats = await ensureTelemetryStatsTable(session);
+
+  const deleted = await deleteAllRecords(session, stats.appToken, stats.tableId);
+  const created = await batchCreateRecords(session, stats.appToken, stats.tableId, buildStatsTableRecords(rows, dailyRows));
+  const dashboards = await listDashboards(session, stats.appToken);
+
+  return {
+    ok: true,
+    app_token: stats.appToken,
+    app_url: stats.appUrl,
+    stats_table_id: stats.tableId,
+    event_row_count: rows.length,
+    daily_row_count: dailyRows.length,
+    deleted_rows: deleted,
+    created_rows: created,
+    dashboard_count: dashboards.length,
+    dashboards,
+  };
+}
+
+async function getStatsInfo(env) {
+  const appToken = await readState(env, STATE_FEEDBACK_APP_TOKEN);
+  let statsTableId = await readState(env, STATE_STATS_TABLE_ID);
+  const appUrl = appToken ? `https://oy98p636wy.feishu.cn/base/${appToken}` : "";
+  const todayDate = utcDate();
+  const todayRow = await env.DB.prepare(
+    `SELECT COALESCE(SUM(count), 0) AS total_count
+     FROM event_counts
+     WHERE event_date = ?`
+  ).bind(todayDate).first();
+  let dashboards = [];
+  if (appToken) {
+    const session = await createFeishuSession(env);
+    dashboards = await listDashboards(session, appToken);
+    if (!statsTableId) {
+      const tables = await listTables(session, appToken);
+      const matchedTable = tables.find((item) => String(item.name || "") === STATS_TABLE_NAME);
+      if (matchedTable) {
+        statsTableId = String(matchedTable.table_id || "");
+      }
+    }
+  }
+  return {
+    ok: true,
+    has_stats_app: Boolean(appToken),
+    app_token: appToken,
+    app_url: appUrl,
+    stats_table_id: statsTableId,
+    dashboard_count: dashboards.length,
+    dashboards,
+    today_date: todayDate,
+    today_total: Number(todayRow?.total_count || 0),
+  };
+}
+
+function isAuthorizedAdminRequest(request, env) {
+  const expectedToken = String(env.ADMIN_SYNC_TOKEN || "").trim();
+  if (!expectedToken) {
+    return false;
+  }
+  const authorization = String(request.headers.get("authorization") || "");
+  return authorization === `Bearer ${expectedToken}`;
+}
+
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     if (request.method === "GET" && url.pathname === "/health") {
       return jsonResponse({ ok: true, service: "yeehe-telemetry" });
+    }
+
+    if (request.method === "GET" && url.pathname === "/stats-info") {
+      try {
+        return jsonResponse(await getStatsInfo(env));
+      } catch (error) {
+        return jsonResponse({ ok: false, message: String(error?.message || "Failed to load stats info.") }, 500);
+      }
+    }
+
+    if (request.method === "POST" && url.pathname === "/admin/sync-telemetry") {
+      if (!isAuthorizedAdminRequest(request, env)) {
+        return jsonResponse({ ok: false, message: "Unauthorized" }, 401);
+      }
+      try {
+        return jsonResponse(await syncTelemetryStats(env));
+      } catch (error) {
+        return jsonResponse({ ok: false, message: String(error?.message || "Sync failed.") }, 500);
+      }
     }
 
     if (request.method === "POST" && url.pathname === "/collect") {
@@ -387,5 +691,9 @@ export default {
     }
 
     return jsonResponse({ ok: false, message: "Not found" }, 404);
+  },
+
+  async scheduled(_controller, env, ctx) {
+    ctx.waitUntil(syncTelemetryStats(env));
   },
 };
