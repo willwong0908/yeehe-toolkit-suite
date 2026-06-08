@@ -938,7 +938,7 @@ class TermExtractionService:
             rt.stats["current_batch"] = snapshot.processed_count
             rt.stats["progress_current"] = min(int(progress_total or snapshot.total_count), snapshot.processed_count)
             rt.stats["current_concurrency"] = snapshot.current_concurrency
-            rt.stats["retry_count"] = snapshot.retry_count
+            rt.stats["retry_count"] = snapshot.retry_count + int(rt.stats.get("semantic_retry_count", 0) or 0)
             rt.completed_batch_ids.append(request.task_id)
             if response.success:
                 rt.stats["success_count"] = rt.stats.get("success_count", 0) + 1
@@ -1068,6 +1068,9 @@ class TermExtractionService:
             last_parsed = parser(response.content)
             semantic_attempt_count += 1
             runtime.stats["semantic_retry_count"] = int(runtime.stats.get("semantic_retry_count", 0) or 0) + 1
+            runtime.stats["retry_count"] = int(runtime.stats.get("retry_count", 0) or 0) + 1
+            self.runtime_store.save(runtime)
+            self._emit_progress(runtime, message=retry_message)
             if not list(last_parsed.get("batch_issues", []) or []) and not dict(last_parsed.get("item_issues", {}) or {}):
                 self._clear_failure_records(
                     runtime,
