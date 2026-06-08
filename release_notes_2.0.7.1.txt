@@ -1,0 +1,5 @@
+Yeehe Toolkit 2.0.7.1
+
+- 更新检查改为读取 Cloudflare Worker 保存的版本信息，避免启动时直接请求 GitHub API
+- 下载更新包时仍使用 GitHub Release 附件地址
+- 发布流程增加版本信息同步接口，用于测试新版更新链路

@@ -604,21 +604,32 @@ async def fetch_app_update_info() -> dict:
         }
 
     latest_version = str(
-        release_data.get("tag_name")
+        release_data.get("latest_version")
+        or release_data.get("tag_name")
         or release_data.get("name")
         or current_version
     ).strip() or current_version
     asset = _pick_update_asset(release_data) or {}
+    download_url = str(
+        release_data.get("download_url")
+        or asset.get("browser_download_url", "")
+        or ""
+    ).strip()
+    asset_name = str(
+        release_data.get("asset_name")
+        or asset.get("name", "")
+        or ""
+    ).strip()
     return {
         "supported": bool(getattr(sys, "frozen", False)),
         "current_version": current_version,
         "latest_version": latest_version,
         "update_available": _is_remote_version_newer(current_version, latest_version),
-        "release_notes": str(release_data.get("body", "") or "").strip(),
+        "release_notes": str(release_data.get("release_notes") or release_data.get("body", "") or "").strip(),
         "published_at": str(release_data.get("published_at", "") or "").strip(),
-        "download_url": str(asset.get("browser_download_url", "") or "").strip(),
-        "asset_name": str(asset.get("name", "") or "").strip(),
-        "message": "",
+        "download_url": download_url,
+        "asset_name": asset_name,
+        "message": str(release_data.get("message", "") or "").strip(),
     }
 
 

@@ -1,15 +1,12 @@
 """Application constants and default prompts for the WebUI pipeline."""
 
 APP_NAME = "译禾工具合集"
-APP_VERSION = "2.0.7"
+APP_VERSION = "2.0.7.1"
 CONFIG_VERSION = 6
 RUNTIME_CACHE_VERSION = 3
 UPDATE_REPOSITORY_OWNER = "willwong0908"
 UPDATE_REPOSITORY_NAME = "yeehe-toolkit-suite"
-UPDATE_RELEASE_API = "https://api.github.com/repos/{0}/{1}/releases/latest".format(
-    UPDATE_REPOSITORY_OWNER,
-    UPDATE_REPOSITORY_NAME,
-)
+UPDATE_RELEASE_API = "https://yeehe-telemetry.willwong0908.workers.dev/app-update"
 UPDATE_ASSET_NAME_HINTS = [
     "yeehe",
     "toolkit",

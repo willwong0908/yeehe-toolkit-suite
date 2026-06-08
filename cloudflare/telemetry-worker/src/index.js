@@ -14,6 +14,7 @@ const STATS_FIELD_COUNT = "\u6b21\u6570";
 const DEFAULT_FEISHU_APP_TOKEN = "IQzWbHaNSa0YS4s8TQ0cNwcjnig";
 const DEFAULT_FEEDBACK_TABLE_ID = "tbllz4fLlof3RPsf";
 const DEFAULT_STATS_TABLE_ID = "tblktD7KDOt1scMp";
+const STATE_APP_UPDATE_INFO = "app_update_info_v1";
 
 const CHUNK_CREATE_LIMIT = 1000;
 const CHUNK_DELETE_LIMIT = 500;
@@ -98,6 +99,19 @@ async function writeBatch(env, rows) {
   }
   await env.DB.batch(statements);
   return merged.size;
+}
+
+async function readState(env, key) {
+  const row = await env.DB.prepare("SELECT value FROM worker_state WHERE key = ?").bind(key).first();
+  return row?.value ? String(row.value) : "";
+}
+
+async function writeState(env, key, value) {
+  await env.DB.prepare(
+    `INSERT INTO worker_state (key, value, updated_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).bind(key, String(value), utcNow()).run();
 }
 
 async function getTenantAccessToken(env) {
@@ -574,6 +588,58 @@ async function getStatsInfo(env) {
   };
 }
 
+function normalizeAppUpdateBody(body) {
+  const latestVersion = String(body?.latest_version || body?.version || "").trim();
+  const downloadUrl = String(body?.download_url || "").trim();
+  if (!latestVersion) {
+    throw new Error("latest_version is required.");
+  }
+  if (!downloadUrl) {
+    throw new Error("download_url is required.");
+  }
+  return {
+    latest_version: latestVersion,
+    release_notes: String(body?.release_notes || "").trim(),
+    published_at: String(body?.published_at || new Date().toISOString()).trim(),
+    download_url: downloadUrl,
+    asset_name: String(body?.asset_name || "").trim(),
+    message: String(body?.message || "").trim(),
+    updated_at: utcNow(),
+  };
+}
+
+async function getAppUpdateInfo(env) {
+  const raw = await readState(env, STATE_APP_UPDATE_INFO);
+  if (!raw) {
+    return {
+      latest_version: "",
+      release_notes: "",
+      published_at: "",
+      download_url: "",
+      asset_name: "",
+      message: "暂时没有可用的更新信息。",
+    };
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {
+      latest_version: "",
+      release_notes: "",
+      published_at: "",
+      download_url: "",
+      asset_name: "",
+      message: "更新信息读取失败。",
+    };
+  }
+}
+
+async function saveAppUpdateInfo(env, body) {
+  const info = normalizeAppUpdateBody(body);
+  await writeState(env, STATE_APP_UPDATE_INFO, JSON.stringify(info));
+  return { ok: true, update: info };
+}
+
 function isAuthorizedAdminRequest(request, env) {
   const expectedToken = String(env.ADMIN_SYNC_TOKEN || "").trim();
   if (!expectedToken) {
@@ -589,6 +655,31 @@ export default {
 
     if (request.method === "GET" && url.pathname === "/health") {
       return jsonResponse({ ok: true, service: "yeehe-telemetry" });
+    }
+
+    if (request.method === "GET" && url.pathname === "/app-update") {
+      try {
+        return jsonResponse(await getAppUpdateInfo(env));
+      } catch (error) {
+        return jsonResponse({ ok: false, message: String(error?.message || "Failed to load update info.") }, 500);
+      }
+    }
+
+    if (request.method === "POST" && url.pathname === "/admin/app-update") {
+      if (!isAuthorizedAdminRequest(request, env)) {
+        return jsonResponse({ ok: false, message: "Unauthorized" }, 401);
+      }
+      let body = {};
+      try {
+        body = await request.json();
+      } catch {
+        return jsonResponse({ ok: false, message: "Invalid JSON" }, 400);
+      }
+      try {
+        return jsonResponse(await saveAppUpdateInfo(env, body));
+      } catch (error) {
+        return jsonResponse({ ok: false, message: String(error?.message || "Failed to save update info.") }, 400);
+      }
     }
 
     if (request.method === "GET" && url.pathname === "/stats-info") {
