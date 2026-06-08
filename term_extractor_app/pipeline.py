@@ -161,12 +161,15 @@ class TermExtractionService:
         self._task_log_dir = target
         return target
 
-    def _write_task_trace(self, runtime: RuntimeTaskState, name: str, payload: Dict[str, object]) -> None:
+    def _write_task_trace(self, runtime: RuntimeTaskState, name: str, payload: Dict[str, object]) -> Optional[Path]:
         try:
             target_dir = self._ensure_task_log_dir(runtime)
-            (target_dir / name).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            target_path = target_dir / name
+            target_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            return target_path
         except Exception as exc:
             self._log("写入任务日志失败：{0}".format(exc), level="warning")
+            return None
 
     @staticmethod
     def _truncate_text(value: object, max_chars: int = 4000) -> str:
@@ -185,6 +188,16 @@ class TermExtractionService:
                 }
             )
         return summarized
+
+    @staticmethod
+    def _full_messages(messages):
+        return [
+            {
+                "role": str(message.get("role", "") or ""),
+                "content": str(message.get("content", "") or ""),
+            }
+            for message in list(messages or [])
+        ]
 
     def _emit_progress(self, runtime: RuntimeTaskState, **extra) -> None:
         payload = {
@@ -1041,6 +1054,19 @@ class TermExtractionService:
         last_parsed = parsed
         last_request = request
         semantic_attempt_count = 0
+        self._write_semantic_validation_trace(
+            runtime,
+            request,
+            response,
+            {
+                "batch_issues": list(parsed.get("batch_issues", []) or []),
+                "item_issues": dict(parsed.get("item_issues", {}) or {}),
+            },
+            fallback,
+            guidance=self._format_nontrans_parse_retry_guidance(parsed, fallback),
+            semantic_attempt_count=semantic_attempt_count,
+            source_excerpt=self._nontrans_request_excerpt(request),
+        )
         for attempt in range(2, 4):
             guidance = self._format_nontrans_parse_retry_guidance(last_parsed, fallback)
             retry_messages = [dict(message) for message in list(request.messages or [])]
@@ -1083,6 +1109,19 @@ class TermExtractionService:
             self._log(
                 "{0} 第 {1} 次校验仍未通过，继续重试。".format(fallback, attempt),
                 level="warning",
+            )
+            self._write_semantic_validation_trace(
+                runtime,
+                last_request,
+                response,
+                {
+                    "batch_issues": list(last_parsed.get("batch_issues", []) or []),
+                    "item_issues": dict(last_parsed.get("item_issues", {}) or {}),
+                },
+                fallback,
+                guidance=self._format_nontrans_parse_retry_guidance(last_parsed, fallback),
+                semantic_attempt_count=semantic_attempt_count,
+                source_excerpt=self._nontrans_request_excerpt(last_request),
             )
 
         reason = self._build_nontrans_parse_failure_reason(last_parsed, fallback)
@@ -1759,8 +1798,12 @@ class TermExtractionService:
                 "task_id": request.task_id,
                 "task_type": request.task_type,
                 "metadata": dict(getattr(request, "metadata", {}) or {}),
-                "messages": self._summarize_messages(getattr(request, "messages", []) or []),
-                "prompt": self._truncate_text(getattr(request, "prompt", "") or "", 6000),
+                "messages": self._full_messages(getattr(request, "messages", []) or []),
+                "prompt": str(getattr(request, "prompt", "") or ""),
+                "summary": {
+                    "prompt_chars": self._estimate_prompt_chars(request),
+                    "message_count": len(list(getattr(request, "messages", []) or [])),
+                },
             },
         )
         self._write_task_trace(
@@ -1778,7 +1821,11 @@ class TermExtractionService:
                 "error_type": response.error_type,
                 "retryable": response.retryable,
                 "response_metadata": dict(getattr(response, "response_metadata", {}) or {}),
-                "content": self._truncate_text(getattr(response, "content", "") or "", 6000),
+                "content": str(getattr(response, "content", "") or ""),
+                "summary": {
+                    "response_chars": len(str(getattr(response, "content", "") or "")),
+                    "json_mode": self._current_json_mode(response),
+                },
             },
         )
         self._log(
@@ -2186,8 +2233,9 @@ class TermExtractionService:
                 "raw_response": self._truncate_text(getattr(response, "content", "") or "", 5000),
             }
             target_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            self._log("失败响应诊断已写入：{0}".format(target_path), level="warning")
         except Exception as exc:  # pragma: no cover - debugging fallback
-            self._log("鍐欏叆澶辫触鍝嶅簲璋冭瘯鏂囦欢澶辫触锛歿0}".format(exc), level="warning")
+            self._log("写入失败响应调试文件失败：{0}".format(exc), level="warning")
 
     def _write_semantic_response_debug(self, request, response, source_excerpt: str, parsed_issues: Dict[str, object]) -> None:
         original_error = getattr(response, "error", "")
@@ -2204,6 +2252,40 @@ class TermExtractionService:
             response.error = original_error
             response.error_type = original_error_type
             response.response_metadata = original_metadata
+
+    def _write_semantic_validation_trace(
+        self,
+        runtime: RuntimeTaskState,
+        request,
+        response,
+        parsed_issues: Dict[str, object],
+        fallback: str,
+        guidance: str = "",
+        semantic_attempt_count: int = 0,
+        source_excerpt: str = "",
+    ) -> None:
+        task_id = str(getattr(request, "task_id", "") or "unknown")
+        if not source_excerpt:
+            source_excerpt = self._nontrans_request_excerpt(request)
+        target_path = self._write_task_trace(
+            runtime,
+            "semantic_validation_{0}.json".format(task_id),
+            {
+                "stage": str(getattr(request, "metadata", {}).get("stage", "") or runtime.stage),
+                "task_id": task_id,
+                "task_type": str(getattr(request, "task_type", "") or ""),
+                "fallback": fallback,
+                "semantic_attempt_count": int(semantic_attempt_count or 0),
+                "parsed_issues": parsed_issues,
+                "retry_guidance": guidance,
+                "request_metadata": dict(getattr(request, "metadata", {}) or {}),
+                "request_messages": self._full_messages(getattr(request, "messages", []) or []),
+                "raw_response": str(getattr(response, "content", "") or ""),
+                "source_excerpt": source_excerpt,
+            },
+        )
+        if target_path is not None:
+            self._log("语义校验诊断已写入：{0}".format(target_path), level="warning")
 
     def _validate_candidate_batch_response(self, request, response):
         if not response.success:
