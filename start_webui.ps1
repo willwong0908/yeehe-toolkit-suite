@@ -5,7 +5,10 @@ $host.UI.RawUI.WindowTitle = "Yeehe Toolkit Suite"
 
 try {
     $packagedExe = Join-Path $PSScriptRoot "program\\Yeehe_Toolkit_Suite.exe"
-    if (Test-Path -LiteralPath $packagedExe) {
+    if (Test-Path -LiteralPath (Join-Path $PSScriptRoot ".git")) {
+        python webui_launcher.py
+    }
+    elseif (Test-Path -LiteralPath $packagedExe) {
         & $packagedExe
     }
     else {
