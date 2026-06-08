@@ -13,6 +13,7 @@ from .forbidden_service import check_forbidden_words, get_forbidden_template, pa
 from .output_service import generate_review_excel
 from .prompt_service import get_prompt_template
 from .shared_provider import SharedProviderError, get_shared_ai_settings, review_chat
+from ..telemetry import infer_model_tier, track_event
 
 DEFAULT_DIRECTIONAL_SYSTEM_PROMPT = """你是专业翻译审校员。你的任务是按照用户指定的定向审校类型，检查译文相对于原文是否存在对应问题。
 
@@ -160,6 +161,7 @@ def create_review_task(
             (task_id, batch_id, len(items), dumps_json(config), now, now),
         )
     _add_log(task_id, "info", f"任务已创建，共 {len(items)} 条")
+    _track_ai_review_start(config)
     thread = threading.Thread(target=_run_review_task, args=(task_id,), daemon=True)
     thread.start()
     return task_id
@@ -304,10 +306,12 @@ def _run_review_task(task_id: str) -> None:
     except Exception as exc:
         _add_log(task_id, "error", f"结果 Excel 输出失败：{exc}")
         _update_task(task_id, status="completed_with_errors")
+        _track_ai_review_finish(config, success=False)
         return
 
     final_status = "completed" if failed_count == 0 else "completed_with_errors"
     _update_task(task_id, status=final_status)
+    _track_ai_review_finish(config, success=True)
     _add_log(task_id, "info", f"任务完成：成功 {completed_count - failed_count} 条，失败 {failed_count} 条")
 
 
@@ -691,6 +695,39 @@ def _add_log(task_id: str, level: str, message: str) -> None:
             (task_id, level, message, timestamp),
         )
     print(f"[AI_REVIEW][{timestamp}][{level.upper()}][{task_id}] {message}", flush=True)
+
+
+def _track_ai_review_start(config: dict[str, Any]) -> None:
+    track_event("task_start.ai_review")
+    if bool(config.get("enable_forbidden_check")):
+        track_event("task_option.blocked_terms_enabled")
+    if not bool(config.get("enable_ai_review", True)):
+        return
+    if str(config.get("mode", "normal")) == "directional":
+        track_event("task_mode.directional_review")
+    else:
+        track_event("task_mode.general_review")
+    track_event("task_start.ai_tool")
+    if bool(config.get("enable_thinking", False)):
+        track_event("model_mode.thinking_enabled")
+    tier = infer_model_tier(str(config.get("model", "")))
+    if tier == "flash":
+        track_event("model_tier.flash")
+    elif tier == "pro":
+        track_event("model_tier.pro")
+
+
+def _track_ai_review_finish(config: dict[str, Any], *, success: bool) -> None:
+    if success:
+        track_event("task_success.ai_review")
+    else:
+        track_event("task_fail.ai_review")
+    if not bool(config.get("enable_ai_review", True)):
+        return
+    if success:
+        track_event("task_success.ai_tool")
+    else:
+        track_event("task_fail.ai_tool")
 
 
 def _task_to_dict(row: Any) -> dict[str, Any]:

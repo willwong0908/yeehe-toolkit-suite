@@ -99,6 +99,7 @@ if __package__:
         load_pending_nontrans_rule_imports,
         mark_pending_nontrans_rule_notice,
     )
+    from .telemetry import track_event
 else:
     package_root = Path(__file__).resolve().parent.parent
     if str(package_root) not in sys.path:
@@ -187,6 +188,7 @@ else:
         load_pending_nontrans_rule_imports,
         mark_pending_nontrans_rule_notice,
     )
+    from term_extractor_app.telemetry import track_event
 
 
 class StartTaskPayload(BaseModel):
@@ -287,6 +289,10 @@ class PromptTemplateResetPayload(BaseModel):
 
 class AppUpdateStartPayload(BaseModel):
     force: bool = False
+
+
+class ToolOpenPayload(BaseModel):
+    tool_key: str
 
 
 class CrossExcelSearchPayload(BaseModel):
@@ -535,6 +541,14 @@ def _resolve_logo_path() -> Path:
         if path.exists() and path.is_file():
             return path
     raise FileNotFoundError("未找到 logo.png")
+
+
+TOOL_OPEN_EVENT_MAP = {
+    "home_guide": "tool_open.home_guide",
+    "text_preprocess": "tool_open.text_preprocess",
+    "ai_review": "tool_open.ai_review",
+    "cross_excel": "tool_open.cross_excel",
+}
 
 
 async def fetch_app_update_info() -> dict:
@@ -910,6 +924,13 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return FileResponse(logo_path, media_type="image/png")
 
+    @app.post("/api/telemetry/tool-open")
+    async def telemetry_tool_open(payload: ToolOpenPayload):
+        event_name = TOOL_OPEN_EVENT_MAP.get(str(payload.tool_key or "").strip())
+        if event_name:
+            track_event(event_name)
+        return {"ok": True}
+
     @app.get("/api/app-update")
     async def get_app_update():
         return await fetch_app_update_info()
@@ -1217,6 +1238,8 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
         settings = task_facade.load_settings()
         clear_pending_nontrans_rule_imports(settings)
         task_facade.save_settings(settings)
+        if import_rows:
+            track_event("feature_used.nontrans_regex_imported")
         return {
             "ok": True,
             **response,
@@ -1226,8 +1249,11 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
     @app.post("/api/nontrans-pending-rules/clear")
     async def clear_pending_nontrans_rules():
         settings = task_facade.load_settings()
+        had_pending = bool(load_pending_nontrans_rule_imports(settings))
         clear_pending_nontrans_rule_imports(settings)
         task_facade.save_settings(settings)
+        if had_pending:
+            track_event("feature_used.nontrans_regex_discarded")
         return {"ok": True, **pending_nontrans_rules_response(settings)}
 
     @app.get("/api/prompt-templates")
@@ -1296,18 +1322,22 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
     @app.post("/api/cross-excel/search")
     async def cross_excel_search(payload: CrossExcelSearchPayload):
         try:
-            return search_excel_rows(payload.folder_path, payload.query, payload.limit)
+            track_event("task_action.cross_excel_search")
+            result = search_excel_rows(payload.folder_path, payload.query, payload.limit)
+            return result
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/cross-excel/merge")
     async def cross_excel_merge(payload: CrossExcelMergePayload):
         try:
-            return merge_excel_files_by_headers(
+            track_event("task_action.cross_excel_merge")
+            result = merge_excel_files_by_headers(
                 payload.folder_path,
                 payload.headers,
                 apply_format=payload.apply_format,
             )
+            return result
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1932,6 +1962,7 @@ INDEX_HTML = """<!doctype html>
       </header>
 
       <section id="toolGuidePage" class="page-section active">
+        <div class="inline-notice">本工具会统计匿名的功能触发次数，不收集文本内容、文件名、路径、账号或密钥等敏感信息。</div>
         <div class="tool-guide-grid">
           <button class="tool-guide-card" type="button" data-tool-guide="textPreprocess">文本预处理工具</button>
           <button class="tool-guide-card" type="button" data-tool-guide="aiReview">AI 审校工具</button>
@@ -2932,6 +2963,16 @@ body {
 .shortcut-button { min-height: 40px; }
 .page-section { display: none; }
 .page-section.active { display: block; }
+.inline-notice {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(205, 220, 215, 0.95);
+  background: rgba(245, 249, 247, 0.92);
+  color: #506272;
+  font-size: 13px;
+  line-height: 1.6;
+}
 .tool-guide-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -3789,6 +3830,7 @@ let crossExcelScanState = null;
 let crossExcelSearchState = null;
 let crossExcelOutputFile = "";
 let currentPageId = "toolGuidePage";
+let lastTrackedToolKey = "";
 let aiReviewBatch = null;
 let aiReviewTaskId = "";
 let aiReviewLogCursor = 0;
@@ -3913,6 +3955,32 @@ const TOOL_GUIDES = {
   },
 };
 
+const TOOL_KEY_BY_PAGE = {
+  toolGuidePage: "home_guide",
+  overviewPage: "text_preprocess",
+  modelStageSettingsPage: "text_preprocess",
+  nontransSettingsPage: "text_preprocess",
+  promptSettingsPage: "text_preprocess",
+  runDetailsPage: "text_preprocess",
+  resultsPage: "text_preprocess",
+  aiReviewTaskPage: "ai_review",
+  aiReviewSettingsPage: "ai_review",
+  aiReviewForbiddenPage: "ai_review",
+  crossExcelPage: "cross_excel",
+};
+
+async function trackToolOpen(toolKey) {
+  if (!toolKey || toolKey === lastTrackedToolKey) return;
+  lastTrackedToolKey = toolKey;
+  try {
+    await api("/api/telemetry/tool-open", {
+      method: "POST",
+      body: JSON.stringify({ tool_key: toolKey }),
+    });
+  } catch (error) {
+  }
+}
+
 function setPage(pageId) {
   currentPageId = pageId;
   document.querySelectorAll(".page-section").forEach((section) => {
@@ -3933,6 +4001,7 @@ function setPage(pageId) {
   if (pageId === "nontransSettingsPage" && pendingRuleState.show_library_dot) {
     markPendingRuleSeen({ library_seen: true }).catch(() => {});
   }
+  trackToolOpen(TOOL_KEY_BY_PAGE[pageId] || "");
   renderCurrentTaskStatus();
 }
 

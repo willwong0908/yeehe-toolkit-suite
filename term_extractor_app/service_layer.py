@@ -16,6 +16,7 @@ from .logging_utils import configure_file_logger, reset_file_logger
 from .models import AppSettings, RuntimeTaskState, TaskInput
 from .pipeline import TaskCancelledError, TermExtractionService
 from .storage import AppPaths, RuntimeCacheStore, SettingsStore, get_app_paths
+from .telemetry import infer_model_tier, track_event
 
 
 @dataclass
@@ -106,6 +107,7 @@ class ExtractionTaskFacade:
         self._is_running = False
         self._output_file = ""
         self._last_error = ""
+        self._active_telemetry_context: Dict[str, object] = {}
 
     def load_settings(self) -> AppSettings:
         return self.settings_store.load()
@@ -134,6 +136,12 @@ class ExtractionTaskFacade:
             self._last_progress = {}
             self._output_file = ""
             self._last_error = ""
+            self._active_telemetry_context = _build_telemetry_context(
+                settings=active_settings,
+                task_input=task_input,
+                runtime=self.runtime_store.load() if resume else None,
+            )
+            _track_text_preprocess_start(self._active_telemetry_context)
             self._stop_event.clear()
             self._is_running = True
             self._thread = threading.Thread(
@@ -257,9 +265,11 @@ class ExtractionTaskFacade:
             with self._lock:
                 self._last_error = str(exc)
                 self._logs.append(str(exc))
+                _track_text_preprocess_finish(self._active_telemetry_context, success=False)
         else:
             with self._lock:
                 self._output_file = output_file
+                _track_text_preprocess_finish(self._active_telemetry_context, success=True)
         finally:
             with self._lock:
                 self._is_running = False
@@ -304,3 +314,69 @@ def _count_sheet_rows(workbook, sheet_name: str) -> int:
         if any(cell not in (None, "") for cell in row):
             count += 1
     return count
+
+
+def _build_telemetry_context(
+    *,
+    settings: AppSettings,
+    task_input: Optional[TaskInput],
+    runtime: Optional[RuntimeTaskState],
+) -> Dict[str, object]:
+    input_config = task_input.to_dict() if task_input is not None else dict(runtime.input_config if runtime else {})
+    extraction_mode = str(input_config.get("extraction_mode", "terms") or "terms").strip()
+    provider_name = str(settings.provider_name or "DeepSeek")
+    provider = settings.provider_settings.get(provider_name)
+    model_name = str(provider.model if provider is not None else "")
+    nontrans_stage = dict(settings.input_defaults.get("nontrans_stage_settings", {}) or {})
+    recall_stage = dict(settings.input_defaults.get("term_recall_stage_settings", {}) or {})
+    review_stage = dict(settings.input_defaults.get("term_review_stage_settings", {}) or {})
+
+    if extraction_mode == "terms":
+        uses_ai = True
+        thinking_enabled = bool(
+            (bool(nontrans_stage.get("ai_discovery_enabled", True)) or bool(nontrans_stage.get("ai_regex_generation_enabled", True)))
+            and bool(nontrans_stage.get("enable_thinking", False))
+        ) or bool(recall_stage.get("enable_thinking", False)) or bool(review_stage.get("enable_thinking", False))
+    else:
+        uses_ai = bool(nontrans_stage.get("ai_discovery_enabled", True)) or bool(
+            nontrans_stage.get("ai_regex_generation_enabled", True)
+        )
+        thinking_enabled = uses_ai and bool(nontrans_stage.get("enable_thinking", False))
+
+    return {
+        "extraction_mode": extraction_mode,
+        "uses_ai": uses_ai,
+        "thinking_enabled": thinking_enabled,
+        "model_name": model_name,
+    }
+
+
+def _track_text_preprocess_start(context: Dict[str, object]) -> None:
+    track_event("task_start.text_preprocess")
+    if str(context.get("extraction_mode")) == "nontrans_only":
+        track_event("task_mode.nontrans_only")
+    else:
+        track_event("task_mode.term_extract")
+    if not bool(context.get("uses_ai")):
+        return
+    track_event("task_start.ai_tool")
+    if bool(context.get("thinking_enabled")):
+        track_event("model_mode.thinking_enabled")
+    tier = infer_model_tier(str(context.get("model_name", "")))
+    if tier == "flash":
+        track_event("model_tier.flash")
+    elif tier == "pro":
+        track_event("model_tier.pro")
+
+
+def _track_text_preprocess_finish(context: Dict[str, object], *, success: bool) -> None:
+    if success:
+        track_event("task_success.text_preprocess")
+    else:
+        track_event("task_fail.text_preprocess")
+    if not bool(context.get("uses_ai")):
+        return
+    if success:
+        track_event("task_success.ai_tool")
+    else:
+        track_event("task_fail.ai_tool")

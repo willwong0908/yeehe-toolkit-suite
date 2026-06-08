@@ -79,7 +79,8 @@ from .nontrans import (
 from .providers import ProviderRegistry
 from .scheduler import AdaptiveConcurrencyController, AsyncRequestScheduler
 from .storage import AppPaths, RuntimeCacheStore
-from .storage import SettingsStore, append_pending_nontrans_rule_imports
+from .storage import SettingsStore, append_pending_nontrans_rule_imports, load_pending_nontrans_rule_imports
+from .telemetry import track_event
 
 
 class TaskCancelledError(Exception):
@@ -893,8 +894,11 @@ class TermExtractionService:
             if round_rules:
                 generated_rules.extend(round_rules)
                 latest_settings = self.settings_store.load()
-                append_pending_nontrans_rule_imports(latest_settings, round_rules)
+                pending_before = len(load_pending_nontrans_rule_imports(latest_settings))
+                merged_pending = append_pending_nontrans_rule_imports(latest_settings, round_rules)
                 self.settings_store.save(latest_settings)
+                if len(merged_pending) > pending_before:
+                    track_event("feature_used.nontrans_regex_generated")
 
             regex_rows = deduplicate_nontrans_regex_rows(used_builtin_rows + expand_nontrans_regex_rows(generated_rules))
             if regex_rows:

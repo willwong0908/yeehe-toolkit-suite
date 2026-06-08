@@ -1,0 +1,8 @@
+name = "yeehe-telemetry"
+main = "src/index.js"
+compatibility_date = "2026-06-08"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "yeehe-telemetry"
+database_id = "69c9ecfe-41d8-4184-b417-95cf82eb2eff"
