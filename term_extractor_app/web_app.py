@@ -86,6 +86,7 @@ if __package__:
         deduplicate_nontrans_regex_rows,
         expand_nontrans_regex_rows,
         load_builtin_nontrans_rules,
+        save_builtin_nontrans_rules,
         validate_nontrans_rule,
     )
     from .providers import ProviderRegistry
@@ -173,6 +174,7 @@ else:
         deduplicate_nontrans_regex_rows,
         expand_nontrans_regex_rows,
         load_builtin_nontrans_rules,
+        save_builtin_nontrans_rules,
         validate_nontrans_rule,
     )
     from term_extractor_app.providers import ProviderRegistry
@@ -807,10 +809,7 @@ def _save_builtin_nontrans_rules_to_library(rules_payload: list[BuiltinNonTransR
             )
         normalized_rules.append(model_rule.to_dict())
 
-    BUILTIN_NONTRANS_LIBRARY_FILE.write_text(
-        json.dumps({"version": 1, "rules": normalized_rules}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    save_builtin_nontrans_rules([load_builtin_nontrans_rules()[0].from_dict(rule) for rule in normalized_rules])
     return builtin_nontrans_rules_response()
 
 

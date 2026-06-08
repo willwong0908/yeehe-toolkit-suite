@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 import json
+import os
+import sys
 from collections import OrderedDict
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -237,7 +239,40 @@ DEFAULT_NONTRANS_BUILTIN_RULES: List[Dict[str, object]] = [
     },
 ]
 
-BUILTIN_NONTRANS_LIBRARY_FILE = Path(__file__).resolve().with_name("nontrans_builtin_regex_library.json")
+PACKAGED_NONTRANS_LIBRARY_FILE = Path(__file__).resolve().with_name("nontrans_builtin_regex_library.json")
+BUILTIN_NONTRANS_LIBRARY_FILE = (
+    Path(sys.executable).resolve().parent / "data" / "nontrans_builtin_regex_library.json"
+    if getattr(sys, "frozen", False)
+    else PACKAGED_NONTRANS_LIBRARY_FILE
+)
+
+
+def _appdata_nontrans_library_file() -> Path:
+    base_dir = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
+    return base_dir / "Yeehe Toolkit" / "nontrans_builtin_regex_library.json"
+
+
+def _candidate_builtin_library_files(library_file: Optional[Path] = None) -> List[Path]:
+    if library_file is not None:
+        return [Path(library_file)]
+    candidates = [
+        BUILTIN_NONTRANS_LIBRARY_FILE,
+        _appdata_nontrans_library_file(),
+        PACKAGED_NONTRANS_LIBRARY_FILE,
+    ]
+    unique_candidates: List[Path] = []
+    seen = set()
+    for path in candidates:
+        key = str(path)
+        if key not in seen:
+            seen.add(key)
+            unique_candidates.append(path)
+    return unique_candidates
+
+
+def _write_builtin_library_payload(path: Path, payload: Dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def classify_nontrans_element(element: str) -> str:
@@ -279,16 +314,20 @@ def save_builtin_nontrans_rules(
     rules: Sequence[NonTransRegexRule],
     library_file: Optional[Path] = None,
 ) -> None:
-    path = Path(library_file) if library_file is not None else BUILTIN_NONTRANS_LIBRARY_FILE
     serialized_rules = []
     for index, rule in enumerate(rules, start=1):
         data = rule.to_dict()
         data["order_index"] = int(data.get("order_index", index) or index)
         serialized_rules.append(data)
-    path.write_text(
-        json.dumps({"version": 1, "rules": serialized_rules}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    payload = {"version": 1, "rules": serialized_rules}
+    errors: List[str] = []
+    for path in _candidate_builtin_library_files(library_file):
+        try:
+            _write_builtin_library_payload(path, payload)
+            return
+        except OSError as exc:
+            errors.append("{0}: {1}".format(path, exc))
+    raise OSError("无法写入非译元素内置规则库：{0}".format("；".join(errors)))
 
 
 def update_builtin_rule_examples_from_rows(
@@ -330,8 +369,9 @@ def update_builtin_rule_examples_from_rows(
 
 
 def _load_builtin_nontrans_rule_dicts(library_file: Optional[Path] = None) -> List[Dict[str, object]]:
-    path = Path(library_file) if library_file is not None else BUILTIN_NONTRANS_LIBRARY_FILE
-    if path.exists():
+    for path in _candidate_builtin_library_files(library_file):
+        if not path.exists():
+            continue
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(raw, dict):
@@ -469,28 +509,6 @@ def find_covering_builtin_rows(element: str, rows: Sequence[NonTransRegexRow]) -
     return matched_rows
 
 
-"""
-def validate_nontrans_rule_minimal(rule: NonTransRegexRule) -> List[str]:
-    issues: List[str] = []
-    if rule.element_type not in ALLOWED_NONTRANS_ELEMENT_TYPES:
-        issues.append("涓嶆敮鎸佺殑闈炶瘧鍏冪礌绫诲瀷锛歿0}".format(rule.element_type or "绌哄€?))
-
-    patterns = _rule_role_patterns(rule)
-    if not patterns:
-        issues.append("瑙勫垯娌℃湁鍙墽琛屾鍒?)
-        return issues
-
-    for role, pattern in patterns:
-        if role not in ALLOWED_NONTRANS_ROLES:
-            issues.append("涓嶆敮鎸佺殑寮€濮?缁撴潫/绌虹被鍨嬶細{0}".format(role))
-        try:
-            re.compile(pattern)
-        except re.error as exc:
-            issues.append("{0} 姝ｅ垯鏃犳硶缂栬瘧锛歿1}".format(role, exc))
-    return issues
-
-
-"""
 
 
 def validate_nontrans_rule_minimal(rule: NonTransRegexRule) -> List[str]:

@@ -906,7 +906,10 @@ class TermExtractionService:
             raise ValueError(failure_reason)
 
         regex_rows = attach_runtime_examples_to_nontrans_rows(regex_rows, source_records)
-        update_builtin_rule_examples_from_rows(regex_rows, max_examples_per_rule=3)
+        try:
+            update_builtin_rule_examples_from_rows(regex_rows, max_examples_per_rule=3)
+        except Exception as exc:
+            self._log("更新内置规则库样例失败，已跳过，不影响本次结果导出：{0}".format(exc), level="warning")
         sheet_rows = build_nontrans_regex_sheet_rows(regex_rows)
 
         self._check_cancelled()
