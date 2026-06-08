@@ -63,6 +63,7 @@ from .nontrans import (
     build_nontrans_regex_sheet_rows,
     collect_covering_rows_for_elements,
     deduplicate_nontrans_regex_rows,
+    estimate_prompt_tokens,
     expand_nontrans_regex_rows,
     filter_candidate_nontrans_records,
     load_builtin_nontrans_rules,
@@ -462,6 +463,12 @@ class TermExtractionService:
         except (TypeError, ValueError):
             return int(fallback)
 
+    def _request_limit_int(self, key: str, fallback: int) -> int:
+        try:
+            return int(self.settings.request_limits.get(key, fallback) or fallback)
+        except (TypeError, ValueError):
+            return int(fallback)
+
     def _stage_enable_thinking(self, stage_key: str) -> bool:
         return bool(self._stage_settings(stage_key).get("enable_thinking", False))
 
@@ -700,6 +707,8 @@ class TermExtractionService:
 
         nontrans_settings = self._stage_settings("nontrans_stage_settings")
         chunk_char_limit = self._stage_int_setting("nontrans_stage_settings", "chunk_char_limit", 3000)
+        internal_token_limit = self._request_limit_int("internal_nontrans_prompt_token_limit", 56000)
+        regex_batch_item_limit = self._request_limit_int("internal_nontrans_regex_batch_item_limit", 50)
         enable_thinking = bool(nontrans_settings.get("enable_thinking", False))
         builtin_regex_enabled = bool(nontrans_settings.get("builtin_regex_enabled", True))
         ai_discovery_enabled = bool(nontrans_settings.get("ai_discovery_enabled", True))
@@ -718,6 +727,7 @@ class TermExtractionService:
                 candidate_records,
                 discovery_user_prompt,
                 chunk_char_limit,
+                internal_token_limit=internal_token_limit,
             )
             for batch_index, batch in enumerate(discovery_batches, start=1):
                 discovery_requests.append(
@@ -812,6 +822,8 @@ class TermExtractionService:
                 unresolved_elements,
                 regex_user_prompt,
                 chunk_char_limit,
+                internal_token_limit=internal_token_limit,
+                max_items_per_batch=regex_batch_item_limit,
             )
             for batch_index, batch in enumerate(regex_batches, start=1):
                 regex_requests.append(
@@ -844,25 +856,37 @@ class TermExtractionService:
 
             round_rules = []
             for request in regex_requests:
-                elements_by_request_id = {}
-                for item in list(request.metadata.get("items", []) or []):
-                    request_id = str(item.get("id", ""))
-                    element_text = str(item.get("element", ""))
-                    matched = next((element for element in unresolved_elements if element.element == element_text), None)
-                    if matched is not None:
-                        elements_by_request_id[request_id] = matched
+                def parser_for_regex_request(target_request):
+                    elements_by_request_id = {}
+                    for item in list(target_request.metadata.get("items", []) or []):
+                        request_id = str(item.get("id", ""))
+                        element_text = str(item.get("element", ""))
+                        element_type = str(item.get("element_type", "") or "")
+                        matched = next(
+                            (
+                                element
+                                for element in unresolved_elements
+                                if element.element == element_text and str(element.element_type or "") == element_type
+                            ),
+                            None,
+                        )
+                        if matched is not None:
+                            elements_by_request_id[request_id] = matched
+                    return lambda content, elements_by_request_id=elements_by_request_id: parse_missing_regex_generation_response(
+                        content,
+                        elements_by_request_id,
+                    )
+
                 parsed, _ = await self._resolve_nontrans_parse_with_retries(
                     runtime=runtime,
                     provider_name=provider_name,
                     provider_settings=provider_settings,
                     request=request,
                     initial_response=regex_responses[request.task_id],
-                    parser=lambda content, elements_by_request_id=elements_by_request_id: parse_missing_regex_generation_response(
-                        content,
-                        elements_by_request_id,
-                    ),
+                    parser=parser_for_regex_request(request),
                     fallback="非译元素正则生成响应校验失败",
                     retry_message="非译元素正则生成纠偏重试进行中。",
+                    parser_for_request=parser_for_regex_request,
                 )
                 round_rules.extend(parsed["resolved"])
 
@@ -1035,6 +1059,35 @@ class TermExtractionService:
             "本地校验发现的问题：\n{1}"
         ).format(fallback, joined)
 
+    def _build_nontrans_regex_retry_request(self, request, parsed, attempt: int, guidance: str):
+        if str(getattr(request, "task_type", "") or "") != "nontrans_regex_generation_batch":
+            return None
+        item_issues = dict(parsed.get("item_issues", {}) or {})
+        failed_ids = {str(item_id or "").strip() for item_id in item_issues.keys() if str(item_id or "").strip()}
+        if not failed_ids:
+            return None
+        original_items = list(getattr(request, "metadata", {}).get("items", []) or [])
+        retry_items = [dict(item) for item in original_items if str(item.get("id", "")).strip() in failed_ids]
+        if not retry_items or len(retry_items) >= len(original_items):
+            return None
+        regex_user_prompt = self.settings.prompt_templates["nontrans_regex_user_prompt_template"]
+        retry_prompt = regex_user_prompt.format(items_json=json.dumps(retry_items, ensure_ascii=False, indent=2))
+        retry_prompt = retry_prompt + "\n\nRetry guidance:\n" + guidance
+        metadata = dict(getattr(request, "metadata", {}) or {})
+        metadata["items"] = retry_items
+        metadata["retry_failed_ids_only"] = True
+        metadata["original_task_id"] = str(getattr(request, "task_id", "") or "")
+        return LLMRequest(
+            task_id="{0}_failed_items_retry{1}".format(request.task_id, attempt),
+            task_type=request.task_type,
+            prompt=retry_prompt,
+            messages=[
+                {"role": "system", "content": self.settings.prompt_templates["nontrans_regex_system_prompt_template"]},
+                {"role": "user", "content": retry_prompt},
+            ],
+            metadata=metadata,
+        )
+
     async def _resolve_nontrans_parse_with_retries(
         self,
         runtime,
@@ -1045,6 +1098,7 @@ class TermExtractionService:
         parser,
         fallback: str,
         retry_message: str,
+        parser_for_request=None,
     ):
         stage = str(request.metadata.get("stage", "") or runtime.stage)
         task_type = str(request.task_type or "")
@@ -1054,6 +1108,7 @@ class TermExtractionService:
             self._clear_failure_records(runtime, stage=stage, task_type=task_type, item_ids=[request.task_id])
             return parsed, response
 
+        accumulated_resolved = list(parsed.get("resolved", []) or [])
         last_parsed = parsed
         last_request = request
         semantic_attempt_count = 0
@@ -1072,18 +1127,20 @@ class TermExtractionService:
         )
         for attempt in range(2, 4):
             guidance = self._format_nontrans_parse_retry_guidance(last_parsed, fallback)
-            retry_messages = [dict(message) for message in list(request.messages or [])]
-            if retry_messages and retry_messages[-1].get("role") == "user":
-                retry_messages[-1]["content"] = str(retry_messages[-1].get("content", "") or "") + "\n\nRetry guidance:\n" + guidance
-            else:
-                retry_messages.append({"role": "user", "content": guidance})
-            retry_request = LLMRequest(
-                task_id="{0}_parse_retry{1}".format(request.task_id, attempt),
-                task_type=request.task_type,
-                prompt=str(request.prompt or ""),
-                messages=retry_messages,
-                metadata=dict(request.metadata or {}),
-            )
+            retry_request = self._build_nontrans_regex_retry_request(last_request, last_parsed, attempt, guidance)
+            if retry_request is None:
+                retry_messages = [dict(message) for message in list(request.messages or [])]
+                if retry_messages and retry_messages[-1].get("role") == "user":
+                    retry_messages[-1]["content"] = str(retry_messages[-1].get("content", "") or "") + "\n\nRetry guidance:\n" + guidance
+                else:
+                    retry_messages.append({"role": "user", "content": guidance})
+                retry_request = LLMRequest(
+                    task_id="{0}_parse_retry{1}".format(request.task_id, attempt),
+                    task_type=request.task_type,
+                    prompt=str(request.prompt or ""),
+                    messages=retry_messages,
+                    metadata=dict(request.metadata or {}),
+                )
             retry_responses = await self._run_nontrans_requests(
                 runtime,
                 provider_name,
@@ -1094,13 +1151,28 @@ class TermExtractionService:
             )
             response = retry_responses[retry_request.task_id]
             last_request = retry_request
-            last_parsed = parser(response.content)
+            retry_parser = parser_for_request(retry_request) if parser_for_request is not None else parser
+            last_parsed = retry_parser(response.content)
+            accumulated_resolved.extend(list(last_parsed.get("resolved", []) or []))
             semantic_attempt_count += 1
             runtime.stats["semantic_retry_count"] = int(runtime.stats.get("semantic_retry_count", 0) or 0) + 1
             runtime.stats["retry_count"] = int(runtime.stats.get("retry_count", 0) or 0) + 1
             self.runtime_store.save(runtime)
             self._emit_progress(runtime, message=retry_message)
             if not list(last_parsed.get("batch_issues", []) or []) and not dict(last_parsed.get("item_issues", {}) or {}):
+                if str(getattr(request, "task_type", "") or "") == "nontrans_regex_generation_batch":
+                    merged_resolved = []
+                    seen_rule_ids = set()
+                    for item in accumulated_resolved:
+                        rule_id = str(getattr(item, "rule_id", "") or "")
+                        key = rule_id or str(getattr(item, "pattern", "") or "")
+                        if key and key in seen_rule_ids:
+                            continue
+                        if key:
+                            seen_rule_ids.add(key)
+                        merged_resolved.append(item)
+                    last_parsed = dict(last_parsed)
+                    last_parsed["resolved"] = merged_resolved
                 self._clear_failure_records(
                     runtime,
                     stage=stage,

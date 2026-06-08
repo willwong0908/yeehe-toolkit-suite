@@ -135,7 +135,9 @@
     "concurrency_mode": "自动",
     "manual_concurrency": 2,
     "auto_max_concurrency": 6,
-    "max_retries": 3
+    "max_retries": 3,
+    "internal_nontrans_prompt_token_limit": 56000,
+    "internal_nontrans_regex_batch_item_limit": 50
   },
   "ui_preferences": {
     "window_width": 1360,

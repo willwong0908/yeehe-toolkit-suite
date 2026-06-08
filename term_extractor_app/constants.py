@@ -1,7 +1,7 @@
 """Application constants and default prompts for the WebUI pipeline."""
 
 APP_NAME = "译禾工具合集"
-APP_VERSION = "2.0.5"
+APP_VERSION = "2.0.6"
 CONFIG_VERSION = 6
 RUNTIME_CACHE_VERSION = 3
 UPDATE_REPOSITORY_OWNER = "willwong0908"
@@ -310,6 +310,8 @@ PROVIDER_PRESETS = {
 DEFAULT_REQUEST_LIMITS = {
     "single_item_char_limit": 500,
     "batch_request_char_limit": 3000,
+    "internal_nontrans_prompt_token_limit": 56000,
+    "internal_nontrans_regex_batch_item_limit": 50,
     "concurrency_mode": "自动",
     "manual_concurrency": 2,
     "auto_max_concurrency": 6,

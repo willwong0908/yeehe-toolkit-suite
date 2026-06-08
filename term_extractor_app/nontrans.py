@@ -22,6 +22,8 @@ NONTRANS_ROLE_LABELS = {
 }
 
 DEFAULT_NONTRANS_PLACEHOLDER_FORMAT = "<{n}>"
+DEFAULT_NONTRANS_INTERNAL_PROMPT_TOKEN_LIMIT = 56000
+DEFAULT_NONTRANS_REGEX_BATCH_ITEM_LIMIT = 50
 
 NONTRANS_ELEMENT_TYPE_LABELS = {
     "html": "HTML 代码",
@@ -687,8 +689,10 @@ def build_nontrans_discovery_batches(
     source_records: Sequence[SourceRecord],
     user_prompt_template: str,
     chunk_char_limit: int,
+    internal_token_limit: int = DEFAULT_NONTRANS_INTERNAL_PROMPT_TOKEN_LIMIT,
 ) -> List[Dict[str, object]]:
     effective_limit = max(200, int(chunk_char_limit or 200))
+    effective_token_limit = _effective_internal_token_limit(internal_token_limit)
     batches: List[Dict[str, object]] = []
     current_items: List[Dict[str, object]] = []
 
@@ -700,7 +704,9 @@ def build_nontrans_discovery_batches(
         }
         candidate_items = current_items + [payload]
         candidate_prompt = user_prompt_template.format(items_json=_dump_json(candidate_items))
-        if current_items and len(candidate_prompt) > effective_limit:
+        if current_items and (
+            len(candidate_prompt) > effective_limit or estimate_prompt_tokens(candidate_prompt) > effective_token_limit
+        ):
             batches.append(_finalize_nontrans_batch(current_items, user_prompt_template))
             current_items = [
                 {
@@ -818,20 +824,52 @@ def build_missing_regex_generation_batches(
     elements: Sequence[NonTransElement],
     user_prompt_template: str,
     chunk_char_limit: int,
+    internal_token_limit: int = DEFAULT_NONTRANS_INTERNAL_PROMPT_TOKEN_LIMIT,
+    max_items_per_batch: int = DEFAULT_NONTRANS_REGEX_BATCH_ITEM_LIMIT,
 ) -> List[Dict[str, object]]:
-    items: List[Dict[str, object]] = []
-    for index, element in enumerate(elements, start=1):
-        items.append(
-            {
-                "id": str(index),
-                "element": element.element,
-                "element_type": element.element_type,
-                "examples": _preserve_unique([element.element] + list(element.sample_contexts or []))[:3],
-            }
-        )
-    if not items:
-        return []
-    return [_finalize_nontrans_batch(items, user_prompt_template)]
+    effective_char_limit = max(200, int(chunk_char_limit or 200))
+    effective_token_limit = _effective_internal_token_limit(internal_token_limit)
+    effective_item_limit = _effective_regex_batch_item_limit(max_items_per_batch)
+
+    grouped_elements: "OrderedDict[str, List[NonTransElement]]" = OrderedDict()
+    for element in elements:
+        element_type = str(element.element_type or "other").strip() or "other"
+        grouped_elements.setdefault(element_type, []).append(element)
+
+    batches: List[Dict[str, object]] = []
+    next_id = 1
+
+    def make_item(element: NonTransElement) -> Dict[str, object]:
+        nonlocal next_id
+        item = {
+            "id": str(next_id),
+            "element": element.element,
+            "element_type": element.element_type,
+            "examples": _preserve_unique([element.element] + list(element.sample_contexts or []))[:3],
+        }
+        next_id += 1
+        return item
+
+    for group_elements in grouped_elements.values():
+        current_items: List[Dict[str, object]] = []
+        for element in group_elements:
+            payload = make_item(element)
+            candidate_items = current_items + [payload]
+            candidate_prompt = user_prompt_template.format(items_json=_dump_json(candidate_items))
+            should_split = bool(current_items) and (
+                len(candidate_prompt) > effective_char_limit
+                or estimate_prompt_tokens(candidate_prompt) > effective_token_limit
+                or len(candidate_items) > effective_item_limit
+            )
+            if should_split:
+                batches.append(_finalize_nontrans_batch(current_items, user_prompt_template))
+                current_items = [payload]
+            else:
+                current_items = candidate_items
+        if current_items:
+            batches.append(_finalize_nontrans_batch(current_items, user_prompt_template))
+
+    return batches
 
 
 def parse_missing_regex_generation_response(
@@ -920,6 +958,8 @@ def parse_missing_regex_generation_response(
     uncovered_ids = [item_id for item_id in elements_by_request_id.keys() if item_id not in covered_request_ids]
     if uncovered_ids:
         batch_issues.append("以下 id 没有被任何规则覆盖：{0}".format(",".join(uncovered_ids)))
+        for item_id in uncovered_ids:
+            item_issues.setdefault(item_id, []).append("该 id 没有被任何规则覆盖。")
 
     return {
         "resolved": resolved,
@@ -1358,6 +1398,37 @@ def _dump_json(items: Sequence[Dict[str, object]]) -> str:
     import json
 
     return json.dumps(list(items), ensure_ascii=False, indent=2)
+
+
+def estimate_prompt_tokens(text: object) -> int:
+    value = str(text or "")
+    if not value:
+        return 0
+    ascii_count = 0
+    non_ascii_count = 0
+    for char in value:
+        if ord(char) < 128:
+            ascii_count += 1
+        else:
+            non_ascii_count += 1
+    # Conservative estimate for JSON-heavy prompts: ASCII is about 4 chars/token, CJK is about 1 char/token.
+    return max(1, int((ascii_count + 3) / 4) + non_ascii_count)
+
+
+def _effective_internal_token_limit(value: object = None) -> int:
+    try:
+        limit = int(value or DEFAULT_NONTRANS_INTERNAL_PROMPT_TOKEN_LIMIT)
+    except (TypeError, ValueError):
+        limit = DEFAULT_NONTRANS_INTERNAL_PROMPT_TOKEN_LIMIT
+    return max(1000, limit)
+
+
+def _effective_regex_batch_item_limit(value: object = None) -> int:
+    try:
+        limit = int(value or DEFAULT_NONTRANS_REGEX_BATCH_ITEM_LIMIT)
+    except (TypeError, ValueError):
+        limit = DEFAULT_NONTRANS_REGEX_BATCH_ITEM_LIMIT
+    return max(1, limit)
 
 
 def _finalize_nontrans_batch(items: Sequence[Dict[str, object]], user_prompt_template: str) -> Dict[str, object]:

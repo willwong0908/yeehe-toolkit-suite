@@ -527,6 +527,8 @@ class SettingsStore:
 
         settings.request_limits.setdefault("single_item_char_limit", defaults.request_limits["single_item_char_limit"])
         settings.request_limits.setdefault("batch_request_char_limit", defaults.request_limits["batch_request_char_limit"])
+        for key, value in defaults.request_limits.items():
+            settings.request_limits.setdefault(key, value)
 
         settings.input_defaults.setdefault("nontrans_stage_settings", {})
         settings.input_defaults.setdefault("term_recall_stage_settings", {})
