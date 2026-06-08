@@ -10,7 +10,7 @@ from .storage import AppPaths, get_app_paths
 LOGGER_NAME = "term_extractor_app"
 
 
-def configure_file_logger(paths: Optional[AppPaths] = None) -> logging.Logger:
+def configure_file_logger(paths: Optional[AppPaths] = None, *, with_console: bool = True) -> logging.Logger:
     paths = paths or get_app_paths()
     logger = logging.getLogger(LOGGER_NAME)
     logger.setLevel(logging.INFO)
@@ -27,15 +27,24 @@ def configure_file_logger(paths: Optional[AppPaths] = None) -> logging.Logger:
         file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
         logger.addHandler(file_handler)
 
-    has_console = any(isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler) for handler in logger.handlers)
-    if not has_console:
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-        logger.addHandler(console_handler)
+    console_handlers = [
+        handler
+        for handler in logger.handlers
+        if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler)
+    ]
+    if with_console:
+        if not console_handlers:
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+            logger.addHandler(console_handler)
+    else:
+        for handler in console_handlers:
+            handler.close()
+            logger.removeHandler(handler)
     return logger
 
 
-def reset_file_logger(paths: Optional[AppPaths] = None) -> logging.Logger:
+def reset_file_logger(paths: Optional[AppPaths] = None, *, with_console: bool = True) -> logging.Logger:
     paths = paths or get_app_paths()
     logger = logging.getLogger(LOGGER_NAME)
     target_file = str(paths.log_file)
@@ -55,4 +64,4 @@ def reset_file_logger(paths: Optional[AppPaths] = None) -> logging.Logger:
 
     paths.output_dir.mkdir(parents=True, exist_ok=True)
     Path(paths.log_file).write_text("", encoding="utf-8")
-    return configure_file_logger(paths)
+    return configure_file_logger(paths, with_console=with_console)

@@ -23,7 +23,7 @@ HOST = "127.0.0.1"
 PORT = 8765
 URL = f"http://{HOST}:{PORT}/"
 
-LOGGER = configure_file_logger(get_app_paths())
+LOGGER = configure_file_logger(get_app_paths(), with_console=False)
 
 
 def _prepare_console() -> None:
@@ -121,10 +121,14 @@ def _listen_for_quit(server: uvicorn.Server | None) -> None:
             command = input().strip().lower()
         except EOFError:
             _log_file("info", "Launcher input stream closed.")
+            if server is not None:
+                _log_console("  检测到主窗口已关闭，正在停止服务...")
+                server.should_exit = True
             return
         except KeyboardInterrupt:
             _log_file("info", "Launcher interrupted by keyboard.")
             if server is not None:
+                _log_console("  检测到主窗口已关闭，正在停止服务...")
                 server.should_exit = True
             return
         if command in {"q", "quit", "exit"}:

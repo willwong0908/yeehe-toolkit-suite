@@ -9,3 +9,9 @@ CREATE TABLE IF NOT EXISTS event_counts (
 
 CREATE INDEX IF NOT EXISTS idx_event_counts_name_date
 ON event_counts (event_name, event_date);
+
+CREATE TABLE IF NOT EXISTS worker_state (
+  key TEXT NOT NULL PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, ConfigDict
 
@@ -78,6 +78,7 @@ if __package__:
     from .constants import APP_VERSION, UPDATE_ASSET_NAME_HINTS, UPDATE_RELEASE_API
     from .core import scan_folder
     from .cross_excel import merge_excel_files_by_headers, scan_cross_excel_folder, search_excel_rows
+    from .feedback import FeedbackError, feedback_status, submit_feedback
     from .models import TaskInput, normalize_extraction_mode, sync_extraction_flags
     from .nontrans import (
         NONTRANS_ELEMENT_TYPE_LABELS,
@@ -167,6 +168,7 @@ else:
         scan_cross_excel_folder,
         search_excel_rows,
     )
+    from term_extractor_app.feedback import FeedbackError, feedback_status, submit_feedback
     from term_extractor_app.models import TaskInput, normalize_extraction_mode, sync_extraction_flags
     from term_extractor_app.nontrans import (
         NONTRANS_ELEMENT_TYPE_LABELS,
@@ -923,6 +925,49 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return FileResponse(logo_path, media_type="image/png")
+
+    @app.get("/api/feedback/status")
+    async def get_feedback_status():
+        return feedback_status()
+
+    @app.post("/api/feedback/open-log")
+    async def open_feedback_log():
+        info = feedback_status()
+        log_path = str(info.get("log_path", "") or "").strip()
+        if not log_path:
+            raise HTTPException(status_code=404, detail="未找到日志路径。")
+        try:
+            _open_local_file(log_path)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="打开日志失败：{0}".format(exc)) from exc
+        return {"ok": True, "log_path": log_path}
+
+    @app.post("/api/feedback/submit")
+    async def submit_feedback_endpoint(
+        message: str = Form(...),
+        screenshot: UploadFile | None = File(default=None),
+    ):
+        screenshot_bytes = None
+        screenshot_name = ""
+        screenshot_type = ""
+        if screenshot is not None:
+            screenshot_name = str(screenshot.filename or "").strip()
+            screenshot_type = str(screenshot.content_type or "").strip()
+            screenshot_bytes = await screenshot.read()
+            if not screenshot_bytes:
+                screenshot_bytes = None
+        try:
+            result = submit_feedback(
+                message,
+                screenshot_name=screenshot_name,
+                screenshot_type=screenshot_type,
+                screenshot_bytes=screenshot_bytes,
+            )
+        except FeedbackError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="反馈发送失败：{0}".format(exc)) from exc
+        return result
 
     @app.post("/api/telemetry/tool-open")
     async def telemetry_tool_open(payload: ToolOpenPayload):
@@ -1868,7 +1913,7 @@ INDEX_HTML = """<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>文本预处理工具</title>
+  <title>译禾工具合集</title>
   <link rel="stylesheet" href="/assets/app.css" />
 </head>
 <body>
@@ -1941,6 +1986,9 @@ INDEX_HTML = """<!doctype html>
           <small id="statusMessage">等待开始任务</small>
         </div>
         <small class="service-tip">服务地址：<code>http://127.0.0.1:8765</code></small>
+      </div>
+      <div class="sidebar-actions-panel">
+        <button id="feedbackEntryButton" class="feedback-entry-button" type="button">我要反馈</button>
       </div>
     </aside>
 
@@ -2732,6 +2780,49 @@ INDEX_HTML = """<!doctype html>
       </div>
     </div>
   </div>
+  <div id="feedbackOverlay" class="modal-overlay" hidden>
+    <div class="modal-card feedback-modal">
+      <div class="modal-header">
+        <div>
+          <h3>我要反馈</h3>
+          <p>问题为必填。当前日志会自动附带，截图可按需补充。</p>
+        </div>
+        <button id="closeFeedbackModalButton" class="modal-close" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="grid one">
+        <label>问题<textarea id="feedbackMessageInput" rows="7" placeholder="请尽量写清楚出现了什么问题、在哪一步出现。"></textarea></label>
+        <div class="feedback-attachment-card">
+          <div class="feedback-attachment-head">
+            <strong>截图</strong>
+            <button id="chooseFeedbackScreenshotButton" class="secondary" type="button">选择截图</button>
+          </div>
+          <button id="feedbackScreenshotDropzone" class="feedback-dropzone" type="button">
+            <span class="feedback-dropzone-title">点击选择截图 / 直接拖入这里</span>
+            <span class="feedback-dropzone-subtitle">弹窗打开时也可以直接粘贴截图</span>
+          </button>
+          <small id="feedbackScreenshotName">未选择截图</small>
+          <input id="feedbackScreenshotInput" type="file" accept="image/*" hidden />
+        </div>
+        <div class="feedback-log-card">
+          <div>
+            <strong>日志</strong>
+            <small id="feedbackLogHint">会自动附带当前日志。</small>
+          </div>
+          <div class="actions feedback-log-actions">
+            <button id="openFeedbackLogButton" class="secondary" type="button">打开日志</button>
+          </div>
+          <code id="feedbackLogPath">output/log.txt</code>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <span id="feedbackSubmitHint" class="hint"></span>
+        <div class="modal-footer-actions">
+          <button id="cancelFeedbackButton" class="secondary" type="button">取消</button>
+          <button id="submitFeedbackButton" class="primary" type="button">提交反馈</button>
+        </div>
+      </div>
+    </div>
+  </div>
   <script src="/assets/app.js"></script>
 </body>
 </html>
@@ -2886,6 +2977,26 @@ body {
   background: rgba(255,255,255,.78);
   border: 1px solid var(--line);
   border-radius: 18px;
+}
+.sidebar-actions-panel {
+  margin-top: 14px;
+}
+.feedback-entry-button {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid rgba(31, 111, 104, 0.24);
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f7fbfb 0%, #e6f3f1 100%);
+  color: var(--primary-strong);
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.feedback-entry-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(31, 111, 104, 0.42);
+  box-shadow: 0 12px 26px rgba(31, 111, 104, 0.12);
 }
 .status-block {
   display: grid;
@@ -3789,6 +3900,69 @@ button:disabled { opacity: .58; cursor: not-allowed; }
 .update-modal .summary-line {
   margin-bottom: 16px;
 }
+.feedback-modal {
+  width: min(680px, calc(100vw - 36px));
+}
+.feedback-attachment-card,
+.feedback-log-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #f9fbfd;
+}
+.feedback-attachment-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.feedback-dropzone {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  padding: 18px 16px;
+  border: 1px dashed rgba(31, 111, 104, 0.28);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fbfefd 0%, #f2f8f7 100%);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .18s ease, background .18s ease, transform .18s ease;
+}
+.feedback-dropzone:hover,
+.feedback-dropzone:focus-visible {
+  border-color: rgba(31, 111, 104, 0.52);
+  background: linear-gradient(180deg, #f8fdfc 0%, #eaf6f3 100%);
+  transform: translateY(-1px);
+  outline: none;
+}
+.feedback-dropzone.drag-over {
+  border-color: rgba(31, 111, 104, 0.72);
+  background: linear-gradient(180deg, #ecfaf6 0%, #dff4ee 100%);
+}
+.feedback-dropzone-title {
+  font-weight: 800;
+  color: var(--primary-strong);
+}
+.feedback-dropzone-subtitle {
+  color: var(--muted);
+  font-size: 13px;
+}
+.feedback-log-card code {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #eef3f8;
+  color: #43546a;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.feedback-log-actions {
+  justify-content: flex-start;
+}
 @media (max-width: 980px) {
   .shell { grid-template-columns: 1fr; }
   .sidebar { position: static; }
@@ -3829,6 +4003,8 @@ let lastScanResult = null;
 let crossExcelScanState = null;
 let crossExcelSearchState = null;
 let crossExcelOutputFile = "";
+let feedbackStatusState = { enabled: false, log_path: "output/log.txt", has_log_file: false };
+let feedbackScreenshotFile = null;
 let currentPageId = "toolGuidePage";
 let lastTrackedToolKey = "";
 let aiReviewBatch = null;
@@ -4061,6 +4237,104 @@ function renderTaskStatus(taskLabel, pillText, pillClass, stageLabel, message) {
   $("statusMessage").textContent = message || "等待开始任务";
 }
 
+function clearFeedbackForm() {
+  $("feedbackMessageInput").value = "";
+  $("feedbackScreenshotInput").value = "";
+  feedbackScreenshotFile = null;
+  $("feedbackScreenshotName").textContent = "未选择截图";
+  $("feedbackSubmitHint").textContent = "";
+  $("feedbackScreenshotDropzone").classList.remove("drag-over");
+}
+
+function renderFeedbackStatus(data) {
+  feedbackStatusState = {
+    enabled: Boolean(data?.enabled),
+    log_path: String(data?.log_path || "output/log.txt"),
+    has_log_file: Boolean(data?.has_log_file),
+  };
+  $("feedbackLogPath").textContent = feedbackStatusState.log_path || "output/log.txt";
+  $("feedbackLogHint").textContent = feedbackStatusState.has_log_file
+    ? "会自动附带当前日志。"
+    : "当前还没有生成日志，提交时会只发送问题描述。";
+}
+
+async function loadFeedbackStatus() {
+  try {
+    const data = await api("/api/feedback/status");
+    renderFeedbackStatus(data);
+  } catch (error) {
+    renderFeedbackStatus({});
+  }
+}
+
+function openFeedbackModal() {
+  $("feedbackOverlay").hidden = false;
+  $("feedbackSubmitHint").textContent = "";
+  $("feedbackScreenshotDropzone").focus();
+}
+
+function closeFeedbackModal() {
+  $("feedbackOverlay").hidden = true;
+  $("feedbackSubmitHint").textContent = "";
+}
+
+async function submitFeedback() {
+  const message = String($("feedbackMessageInput").value || "").trim();
+  if (!message) {
+    $("feedbackSubmitHint").textContent = "请先填写问题。";
+    return;
+  }
+  const formData = new FormData();
+  formData.append("message", message);
+  const file = feedbackScreenshotFile || $("feedbackScreenshotInput").files?.[0];
+  if (file) {
+    formData.append("screenshot", file);
+  }
+  const button = $("submitFeedbackButton");
+  button.disabled = true;
+  $("feedbackSubmitHint").textContent = "正在提交...";
+  try {
+    await api("/api/feedback/submit", {
+      method: "POST",
+      body: formData,
+    });
+    $("feedbackSubmitHint").textContent = "反馈已提交。";
+    setTimeout(() => {
+      clearFeedbackForm();
+      closeFeedbackModal();
+    }, 500);
+  } catch (error) {
+    $("feedbackSubmitHint").textContent = String(error.message || "反馈提交失败，请稍后重试。");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function setFeedbackScreenshotFile(file) {
+  if (!file) {
+    feedbackScreenshotFile = null;
+    $("feedbackScreenshotName").textContent = "未选择截图";
+    return;
+  }
+  feedbackScreenshotFile = file;
+  const sizeKb = Math.max(1, Math.round((Number(file.size || 0) / 1024)));
+  $("feedbackScreenshotName").textContent = `${file.name} (${sizeKb} KB)`;
+}
+
+async function readClipboardScreenshot(event) {
+  if ($("feedbackOverlay").hidden) return;
+  const clipboardItems = Array.from(event.clipboardData?.items || []);
+  const imageItem = clipboardItems.find((item) => String(item.type || "").startsWith("image/"));
+  if (!imageItem) return;
+  const file = imageItem.getAsFile();
+  if (!file) return;
+  event.preventDefault();
+  const extension = String(file.type || "image/png").split("/")[1] || "png";
+  const stampedFile = new File([file], `pasted_screenshot.${extension}`, { type: file.type || "image/png" });
+  setFeedbackScreenshotFile(stampedFile);
+  $("feedbackSubmitHint").textContent = "已读取剪贴板截图。";
+}
+
 function setSubtab(group, targetId) {
   document.querySelectorAll(`[data-subtab-group="${group}"]`).forEach((button) => {
     button.classList.toggle("active", button.dataset.subtabTarget === targetId);
@@ -4074,8 +4348,13 @@ function setSubtab(group, targetId) {
 }
 
 async function api(path, options = {}) {
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+  const headers = { ...(options.headers || {}) };
+  if (!isFormData && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
   const response = await fetch(path, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    headers,
     ...options,
   });
   if (!response.ok) {
@@ -6275,6 +6554,45 @@ $("startReviewButton").addEventListener("click", () => startAiReviewTask().catch
 $("openReviewSettingsButton").addEventListener("click", () => setPage("aiReviewSettingsPage"));
 $("openReviewForbiddenButton").addEventListener("click", () => setPage("aiReviewForbiddenPage"));
 $("closeToolGuideDialogButton").addEventListener("click", () => $("toolGuideDialog").close());
+$("feedbackEntryButton").addEventListener("click", openFeedbackModal);
+$("closeFeedbackModalButton").addEventListener("click", closeFeedbackModal);
+$("cancelFeedbackButton").addEventListener("click", closeFeedbackModal);
+$("chooseFeedbackScreenshotButton").addEventListener("click", () => $("feedbackScreenshotInput").click());
+$("feedbackScreenshotDropzone").addEventListener("click", () => {
+  $("feedbackScreenshotDropzone").focus();
+  $("feedbackSubmitHint").textContent = "现在可以直接按 Ctrl+V 粘贴截图，或把图片拖到这里。";
+});
+$("feedbackScreenshotInput").addEventListener("change", () => {
+  const file = $("feedbackScreenshotInput").files?.[0];
+  setFeedbackScreenshotFile(file || null);
+});
+$("feedbackScreenshotDropzone").addEventListener("dragover", (event) => {
+  event.preventDefault();
+  $("feedbackScreenshotDropzone").classList.add("drag-over");
+});
+$("feedbackScreenshotDropzone").addEventListener("dragleave", () => {
+  $("feedbackScreenshotDropzone").classList.remove("drag-over");
+});
+$("feedbackScreenshotDropzone").addEventListener("drop", (event) => {
+  event.preventDefault();
+  $("feedbackScreenshotDropzone").classList.remove("drag-over");
+  const files = Array.from(event.dataTransfer?.files || []);
+  const imageFile = files.find((file) => String(file.type || "").startsWith("image/"));
+  if (!imageFile) {
+    $("feedbackSubmitHint").textContent = "这里只能接收图片文件。";
+    return;
+  }
+  setFeedbackScreenshotFile(imageFile);
+  $("feedbackSubmitHint").textContent = "已读取拖入的截图。";
+});
+$("openFeedbackLogButton").addEventListener("click", async () => {
+  try {
+    await api("/api/feedback/open-log", { method: "POST", body: "{}" });
+  } catch (error) {
+    $("feedbackSubmitHint").textContent = error.message;
+  }
+});
+$("submitFeedbackButton").addEventListener("click", submitFeedback);
 $("enableAiReview").addEventListener("change", updateAiReviewModeVisibility);
 $("enableDirectionalReview").addEventListener("change", updateAiReviewModeVisibility);
 $("reviewAiThinking").addEventListener("change", () => saveReviewSettings().catch((error) => {
@@ -6384,6 +6702,16 @@ document.querySelectorAll(".tool-guide-card").forEach((button) => {
 document.querySelectorAll(".subnav-link").forEach((button) => {
   button.addEventListener("click", () => setSubtab(button.dataset.subtabGroup, button.dataset.subtabTarget));
 });
+document.addEventListener("paste", (event) => {
+  readClipboardScreenshot(event).catch((error) => {
+    $("feedbackSubmitHint").textContent = error.message;
+  });
+});
+$("feedbackOverlay").addEventListener("click", (event) => {
+  if (event.target === $("feedbackOverlay")) {
+    closeFeedbackModal();
+  }
+});
 
 setPage("toolGuidePage");
 renderCrossExcelHeaders([]);
@@ -6392,6 +6720,7 @@ setCrossExcelOutput("");
 updateAiReviewModeVisibility();
 renderCurrentTaskStatus();
 Promise.all([
+  loadFeedbackStatus(),
   loadSettings(),
   loadAsciiPatterns(),
   loadPromptTemplates(),
