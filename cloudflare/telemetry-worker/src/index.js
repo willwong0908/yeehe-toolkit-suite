@@ -1,6 +1,5 @@
 const EVENT_NAME_RE = /^[a-z0-9_.-]{3,80}$/;
 
-const FEEDBACK_APP_NAME = "\u8bd1\u79be\u5de5\u5177\u5408\u96c6\u53cd\u9988";
 const FEEDBACK_FIELD_TEXT = "\u53cd\u9988";
 const FEEDBACK_FIELD_DATE = "\u65e5\u671f";
 const FEEDBACK_FIELD_SCREENSHOT = "\u622a\u56fe";
@@ -12,10 +11,9 @@ const STATS_FIELD_DATE = "\u65e5\u671f";
 const STATS_FIELD_EVENT = "\u7edf\u8ba1\u9879";
 const STATS_FIELD_VERSION = "\u7248\u672c";
 const STATS_FIELD_COUNT = "\u6b21\u6570";
-
-const STATE_FEEDBACK_APP_TOKEN = "feedback_bitable_app_token";
-const STATE_FEEDBACK_TABLE_ID = "feedback_bitable_table_id";
-const STATE_STATS_TABLE_ID = "telemetry_stats_table_id";
+const DEFAULT_FEISHU_APP_TOKEN = "IQzWbHaNSa0YS4s8TQ0cNwcjnig";
+const DEFAULT_FEEDBACK_TABLE_ID = "tbllz4fLlof3RPsf";
+const DEFAULT_STATS_TABLE_ID = "tblktD7KDOt1scMp";
 
 const CHUNK_CREATE_LIMIT = 1000;
 const CHUNK_DELETE_LIMIT = 500;
@@ -102,19 +100,6 @@ async function writeBatch(env, rows) {
   return merged.size;
 }
 
-async function readState(env, key) {
-  const row = await env.DB.prepare("SELECT value FROM worker_state WHERE key = ?").bind(key).first();
-  return row?.value ? String(row.value) : "";
-}
-
-async function writeState(env, key, value) {
-  await env.DB.prepare(
-    `INSERT INTO worker_state (key, value, updated_at)
-     VALUES (?, ?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
-  ).bind(key, String(value), utcNow()).run();
-}
-
 async function getTenantAccessToken(env) {
   const appId = String(env.FEISHU_APP_ID || "").trim();
   const appSecret = String(env.FEISHU_APP_SECRET || "").trim();
@@ -141,6 +126,18 @@ async function createFeishuSession(env) {
     env,
     token: await getTenantAccessToken(env),
   };
+}
+
+function getConfiguredAppToken(env) {
+  return String(env.FEISHU_BASE_APP_TOKEN || DEFAULT_FEISHU_APP_TOKEN).trim();
+}
+
+function getConfiguredFeedbackTableId(env) {
+  return String(env.FEISHU_FEEDBACK_TABLE_ID || DEFAULT_FEEDBACK_TABLE_ID).trim();
+}
+
+function getConfiguredStatsTableId(env) {
+  return String(env.FEISHU_STATS_TABLE_ID || DEFAULT_STATS_TABLE_ID).trim();
 }
 
 async function feishuJson(session, path, options = {}) {
@@ -201,23 +198,6 @@ async function listTables(session, appToken) {
     method: "GET",
   });
   return Array.isArray(data.items) ? data.items : [];
-}
-
-async function createTable(session, appToken, name) {
-  const data = await feishuJson(session, `/open-apis/bitable/v1/apps/${appToken}/tables`, {
-    method: "POST",
-    headers: { "content-type": "application/json; charset=utf-8" },
-    body: JSON.stringify({
-      table: { name },
-    }),
-  });
-  return String(data?.table_id || "").trim();
-}
-
-async function deleteTable(session, appToken, tableId) {
-  await feishuJson(session, `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}`, {
-    method: "DELETE",
-  });
 }
 
 async function listRecords(session, appToken, tableId) {
@@ -337,32 +317,10 @@ async function cleanupUnexpectedFields(session, appToken, tableId, allowedNames)
   }
 }
 
-async function createBitable(session, name) {
-  const appData = await feishuJson(session, "/open-apis/bitable/v1/apps", {
-    method: "POST",
-    headers: { "content-type": "application/json; charset=utf-8" },
-    body: JSON.stringify({ name }),
-  });
-  const appToken = String(appData?.app?.app_token || "").trim();
-  const tableId = String(appData?.app?.default_table_id || "").trim();
-  const appUrl = String(appData?.app?.url || "").trim();
-  if (!appToken || !tableId) {
-    throw new Error("Failed to create Feishu bitable.");
-  }
-  return { appToken, tableId, appUrl };
-}
-
 async function ensureFeedbackTable(session) {
   const env = session.env;
-  let appToken = await readState(env, STATE_FEEDBACK_APP_TOKEN);
-  let tableId = await readState(env, STATE_FEEDBACK_TABLE_ID);
-  if (!appToken || !tableId) {
-    const created = await createBitable(session, FEEDBACK_APP_NAME);
-    appToken = created.appToken;
-    tableId = created.tableId;
-    await writeState(env, STATE_FEEDBACK_APP_TOKEN, appToken);
-    await writeState(env, STATE_FEEDBACK_TABLE_ID, tableId);
-  }
+  const appToken = getConfiguredAppToken(env);
+  const tableId = getConfiguredFeedbackTableId(env);
 
   await ensurePrimaryTextField(session, appToken, tableId, FEEDBACK_FIELD_TEXT);
   await ensureNamedField(session, appToken, tableId, FEEDBACK_FIELD_DATE, 5);
@@ -374,21 +332,19 @@ async function ensureFeedbackTable(session) {
 
 async function ensureTelemetryStatsTable(session) {
   const env = session.env;
-  const feedback = await ensureFeedbackTable(session);
-  const appToken = feedback.appToken;
+  const appToken = getConfiguredAppToken(env);
   const appUrl = `https://oy98p636wy.feishu.cn/base/${appToken}`;
-  let tableId = await readState(env, STATE_STATS_TABLE_ID);
+  let tableId = getConfiguredStatsTableId(env);
 
   const tables = await listTables(session, appToken);
-  const matchedTable = tables.find(
-    (item) => String(item.table_id || "") === tableId || String(item.name || "") === STATS_TABLE_NAME
-  );
-  if (matchedTable) {
-    tableId = String(matchedTable.table_id || "");
-  } else {
-    tableId = await createTable(session, appToken, STATS_TABLE_NAME);
+  const matchedTable = tables.find((item) => String(item.table_id || "") === tableId);
+  if (!matchedTable) {
+    const namedTable = tables.find((item) => String(item.name || "") === STATS_TABLE_NAME);
+    if (!namedTable) {
+      throw new Error(`Stats table is missing: ${tableId}`);
+    }
+    tableId = String(namedTable.table_id || "");
   }
-  await writeState(env, STATE_STATS_TABLE_ID, tableId);
 
   await cleanupUnexpectedFields(session, appToken, tableId, [
     STATS_FIELD_DATE,
@@ -584,8 +540,8 @@ async function syncTelemetryStats(env) {
 }
 
 async function getStatsInfo(env) {
-  const appToken = await readState(env, STATE_FEEDBACK_APP_TOKEN);
-  let statsTableId = await readState(env, STATE_STATS_TABLE_ID);
+  const appToken = getConfiguredAppToken(env);
+  let statsTableId = getConfiguredStatsTableId(env);
   const appUrl = appToken ? `https://oy98p636wy.feishu.cn/base/${appToken}` : "";
   const todayDate = utcDate();
   const todayRow = await env.DB.prepare(
@@ -597,12 +553,12 @@ async function getStatsInfo(env) {
   if (appToken) {
     const session = await createFeishuSession(env);
     dashboards = await listDashboards(session, appToken);
-    if (!statsTableId) {
-      const tables = await listTables(session, appToken);
-      const matchedTable = tables.find((item) => String(item.name || "") === STATS_TABLE_NAME);
-      if (matchedTable) {
-        statsTableId = String(matchedTable.table_id || "");
-      }
+    const tables = await listTables(session, appToken);
+    const matchedTable = tables.find(
+      (item) => String(item.table_id || "") === statsTableId || String(item.name || "") === STATS_TABLE_NAME
+    );
+    if (matchedTable) {
+      statsTableId = String(matchedTable.table_id || "");
     }
   }
   return {

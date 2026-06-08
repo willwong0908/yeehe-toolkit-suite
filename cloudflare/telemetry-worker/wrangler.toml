@@ -2,6 +2,11 @@ name = "yeehe-telemetry"
 main = "src/index.js"
 compatibility_date = "2026-06-08"
 
+[vars]
+FEISHU_BASE_APP_TOKEN = "IQzWbHaNSa0YS4s8TQ0cNwcjnig"
+FEISHU_FEEDBACK_TABLE_ID = "tbllz4fLlof3RPsf"
+FEISHU_STATS_TABLE_ID = "tblktD7KDOt1scMp"
+
 [triggers]
 crons = ["*/30 * * * *"]
 
