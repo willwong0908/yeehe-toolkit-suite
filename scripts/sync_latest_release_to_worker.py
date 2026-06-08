@@ -50,8 +50,30 @@ def pick_asset(assets: list[dict]) -> dict:
     return zip_assets[0]
 
 
+def normalize_version_text(version_text: str) -> str:
+    normalized = str(version_text or "").strip().lower()
+    if normalized.startswith("v"):
+        normalized = normalized[1:]
+    return normalized
+
+
+def validate_release_asset_version(release_data: dict, asset: dict) -> None:
+    release_version = normalize_version_text(str(release_data.get("tagName") or release_data.get("name") or ""))
+    asset_name = str(asset.get("name") or "").strip()
+    asset_version_match = __import__("re").search(r"(\d+(?:\.\d+)+)", asset_name)
+    if not release_version or asset_version_match is None:
+        return
+    asset_version = normalize_version_text(asset_version_match.group(1))
+    if asset_version != release_version:
+        raise RuntimeError(
+            "Release tag and asset version do not match: "
+            f"tag={release_version}, asset={asset_name}"
+        )
+
+
 def build_payload(release_data: dict) -> dict:
     asset = pick_asset(list(release_data.get("assets") or []))
+    validate_release_asset_version(release_data, asset)
     return {
         "latest_version": str(release_data.get("tagName") or release_data.get("name") or "").strip(),
         "release_notes": str(release_data.get("body") or "").strip(),
