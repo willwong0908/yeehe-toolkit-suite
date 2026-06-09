@@ -78,6 +78,14 @@ if __package__:
     from .constants import APP_VERSION, UPDATE_ASSET_NAME_HINTS, UPDATE_RELEASE_API
     from .core import scan_folder
     from .cross_excel import merge_excel_files_by_headers, scan_cross_excel_folder, search_excel_rows
+    from .diff_excel import (
+        DiffRecord as DiffExcelRecord,
+        apply_highlight_to_records as apply_diff_excel_highlight,
+        apply_highlight_from_cache as apply_diff_excel_highlight_from_cache,
+        export_cached_diff_records as export_diff_excel_cached_records,
+        read_cached_diff_preview as read_diff_excel_cached_preview,
+        run_compare_to_cache as run_diff_excel_compare_to_cache,
+    )
     from .feedback import FeedbackError, feedback_status, submit_feedback
     from .models import TaskInput, normalize_extraction_mode, sync_extraction_flags
     from .nontrans import (
@@ -167,6 +175,14 @@ else:
         merge_excel_files_by_headers,
         scan_cross_excel_folder,
         search_excel_rows,
+    )
+    from term_extractor_app.diff_excel import (
+        DiffRecord as DiffExcelRecord,
+        apply_highlight_to_records as apply_diff_excel_highlight,
+        apply_highlight_from_cache as apply_diff_excel_highlight_from_cache,
+        export_cached_diff_records as export_diff_excel_cached_records,
+        read_cached_diff_preview as read_diff_excel_cached_preview,
+        run_compare_to_cache as run_diff_excel_compare_to_cache,
     )
     from term_extractor_app.feedback import FeedbackError, feedback_status, submit_feedback
     from term_extractor_app.models import TaskInput, normalize_extraction_mode, sync_extraction_flags
@@ -307,6 +323,30 @@ class CrossExcelMergePayload(BaseModel):
     folder_path: str
     headers: list[str]
     apply_format: bool = True
+
+
+class DiffExcelComparePayload(BaseModel):
+    path_a: str
+    path_b: str
+
+
+class DiffExcelExportPayload(BaseModel):
+    cache_file: str
+    query: str = ""
+    output_file: str = ""
+
+
+class DiffExcelHighlightPayload(BaseModel):
+    cache_file: str
+    query: str = ""
+    target: str = "A"
+    color_hex: str = "#FFD966"
+
+
+class DiffExcelOpenCellPayload(BaseModel):
+    file_path: str
+    sheet_name: str
+    cell_address: str
 
 
 class AIReviewOpenFilePayload(BaseModel):
@@ -875,6 +915,19 @@ def _ai_review_batch_response(batch_id: str, message: str) -> dict:
     }
 
 
+def _diff_excel_record_from_dict(item: dict) -> DiffExcelRecord:
+    return DiffExcelRecord(
+        filename_a=str(item.get("filename_a", "") or ""),
+        filename_b=str(item.get("filename_b", "") or ""),
+        sheet=str(item.get("sheet", "") or ""),
+        cell_address=str(item.get("cell_address", "") or ""),
+        value_a=str(item.get("value_a", "") or ""),
+        value_b=str(item.get("value_b", "") or ""),
+        file_path_a=str(item.get("file_path_a", "") or ""),
+        file_path_b=str(item.get("file_path_b", "") or ""),
+    )
+
+
 def _ai_review_excel_upload_response(
     *,
     batch_id: str,
@@ -1396,6 +1449,77 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
             return result
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/diff-excel/compare")
+    async def diff_excel_compare(payload: DiffExcelComparePayload):
+        try:
+            track_event("task_action.diff_excel_compare")
+            result = run_diff_excel_compare_to_cache(
+                payload.path_a,
+                payload.path_b,
+                ignore_case=False,
+                trim_whitespace=False,
+            )
+            return result
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/diff-excel/export")
+    async def diff_excel_export(payload: DiffExcelExportPayload):
+        try:
+            track_event("task_action.diff_excel_export")
+            return export_diff_excel_cached_records(
+                payload.cache_file,
+                payload.output_file,
+                query=payload.query,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/diff-excel/highlight")
+    async def diff_excel_highlight(payload: DiffExcelHighlightPayload):
+        try:
+            track_event("task_action.diff_excel_highlight")
+            changed_cells, workbook_count = apply_diff_excel_highlight_from_cache(
+                payload.cache_file,
+                str(payload.target or "A"),
+                str(payload.color_hex or "#FFD966"),
+                query=payload.query,
+            )
+            return {
+                "ok": True,
+                "changed_cells": changed_cells,
+                "workbook_count": workbook_count,
+                "target": str(payload.target or "A"),
+                "color_hex": str(payload.color_hex or "#FFD966"),
+            }
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/diff-excel/preview")
+    async def diff_excel_preview(cache_file: str, query: str = "", limit: int = 1000):
+        try:
+            return read_diff_excel_cached_preview(cache_file, query=query, limit=limit)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/diff-excel/open-cell")
+    async def diff_excel_open_cell(payload: DiffExcelOpenCellPayload):
+        file_path = str(payload.file_path or "").strip()
+        sheet_name = str(payload.sheet_name or "").strip()
+        cell_address = str(payload.cell_address or "").strip()
+        if not file_path or not sheet_name or not cell_address:
+            raise HTTPException(status_code=400, detail="缺少定位所需的信息。")
+        try:
+            _open_local_file(file_path)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {
+            "ok": True,
+            "file_path": file_path,
+            "sheet_name": sheet_name,
+            "cell_address": cell_address,
+        }
 
     @app.get("/api/dialog/select-review-file")
     async def select_review_file():
@@ -1961,7 +2085,7 @@ INDEX_HTML = """<!doctype html>
             <span class="nav-group-title">Diff 工具</span>
           </summary>
           <div class="nav-submenu">
-            <button class="nav-link nav-link-sub nav-link-placeholder" type="button" disabled>功能预留</button>
+            <button class="nav-link nav-link-sub" data-page-target="diffExcelPage">Excel差异比对</button>
           </div>
         </details>
 
@@ -2024,6 +2148,7 @@ INDEX_HTML = """<!doctype html>
         <div class="inline-notice">本工具会统计匿名的功能触发次数，不收集文本内容、文件名、路径、账号或密钥等敏感信息。</div>
         <div class="tool-guide-grid">
           <button class="tool-guide-card" type="button" data-tool-guide="textPreprocess">文本预处理工具</button>
+          <button class="tool-guide-card" type="button" data-tool-guide="diffExcel">Diff 工具</button>
           <button class="tool-guide-card" type="button" data-tool-guide="aiReview">AI 审校工具</button>
           <button class="tool-guide-card" type="button" data-tool-guide="crossExcel">跨Excel搜索与合并</button>
         </div>
@@ -2427,6 +2552,121 @@ INDEX_HTML = """<!doctype html>
             </div>
           </section>
         </div>
+      </section>
+
+      <section id="diffExcelPage" class="page-section">
+        <div class="grid dashboard-grid">
+          <section class="card">
+            <div class="card-title">
+              <h3>比对范围</h3>
+              <p>支持文件对文件，也支持目录对目录。</p>
+            </div>
+            <div class="grid two">
+              <label>路径 A
+                <span class="secret-field">
+                  <input id="diffPathA" placeholder="D:\\项目\\旧版本 或旧文件.xlsx" />
+                  <button id="chooseDiffPathAButton" class="mini-button" type="button">选择文件夹</button>
+                  <button id="chooseDiffFileAButton" class="mini-button" type="button">选择文件</button>
+                </span>
+              </label>
+              <label>路径 B
+                <span class="secret-field">
+                  <input id="diffPathB" placeholder="D:\\项目\\新版本 或新文件.xlsx" />
+                  <button id="chooseDiffPathBButton" class="mini-button" type="button">选择文件夹</button>
+                  <button id="chooseDiffFileBButton" class="mini-button" type="button">选择文件</button>
+                </span>
+              </label>
+            </div>
+            <div class="actions">
+              <button id="startDiffExcelButton" class="primary" type="button">开始比对</button>
+              <button id="clearDiffExcelButton" class="secondary" type="button">清空结果</button>
+              <span id="diffExcelHint" class="hint"></span>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-title">
+              <h3>当前状态</h3>
+              <p>比对完成后可直接导出结果或批量标记。</p>
+            </div>
+            <div class="metrics hero-metrics">
+              <div><span>模式</span><strong id="diffModeLabel">未开始</strong></div>
+              <div><span>A 文件数</span><strong id="diffFilesInA">0</strong></div>
+              <div><span>B 文件数</span><strong id="diffFilesInB">0</strong></div>
+              <div><span>配对数</span><strong id="diffMatchedPairs">0</strong></div>
+              <div><span>差异数</span><strong id="diffTotalCount">0</strong></div>
+              <div><span>预览数</span><strong id="diffVisibleCount">0</strong></div>
+            </div>
+            <div class="result-file">
+              <span>导出文件</span>
+              <strong id="diffOutputFile">暂无输出</strong>
+              <small id="diffOutputHint">比对完成后可导出差异结果。</small>
+            </div>
+            <div class="actions">
+              <button id="exportDiffExcelButton" class="secondary" type="button" disabled>导出结果</button>
+              <button id="openDiffOutputFileButton" class="secondary" type="button" disabled>打开文件</button>
+              <button id="openDiffOutputFolderButton" class="secondary" type="button" disabled>打开输出目录</button>
+            </div>
+          </section>
+        </div>
+
+        <div class="grid dashboard-grid">
+          <section class="card">
+            <div class="card-title">
+              <h3>批量标记</h3>
+              <p>把当前预览结果批量标记回原表。</p>
+            </div>
+            <div class="grid two">
+              <label>标记到
+                <select id="diffMarkTarget">
+                  <option value="A">文件 A</option>
+                  <option value="B">文件 B</option>
+                </select>
+              </label>
+              <div class="color-picker-block">
+                <label>颜色
+                  <input id="diffHighlightColor" type="color" value="#FFD966" />
+                </label>
+                <div class="preset-color-row" aria-label="常用标记颜色">
+                  <button type="button" class="preset-color-btn" data-color="#F44336" title="红色"></button>
+                  <button type="button" class="preset-color-btn" data-color="#FF9800" title="橙色"></button>
+                  <button type="button" class="preset-color-btn" data-color="#FFEB3B" title="黄色"></button>
+                  <button type="button" class="preset-color-btn" data-color="#4CAF50" title="绿色"></button>
+                  <button type="button" class="preset-color-btn" data-color="#2196F3" title="蓝色"></button>
+                  <button type="button" class="preset-color-btn" data-color="#9C27B0" title="紫色"></button>
+                </div>
+              </div>
+            </div>
+            <div class="actions">
+              <button id="highlightDiffExcelButton" class="primary" type="button" disabled>标记差异结果</button>
+              <span id="diffHighlightHint" class="hint"></span>
+            </div>
+          </section>
+        </div>
+
+        <section class="card">
+          <div class="card-title">
+            <h3>差异预览</h3>
+            <p>点击打开可直接打开原文件。当前版本先打开文件本身，后续再补更细的单元格定位联动。</p>
+          </div>
+          <div class="pattern-table-wrap">
+            <table class="pattern-table">
+              <thead>
+                <tr>
+                  <th>文件 A</th>
+                  <th>文件 B</th>
+                  <th>Sheet</th>
+                  <th>单元格</th>
+                  <th>差异对照</th>
+                  <th>打开</th>
+                </tr>
+              </thead>
+              <tbody id="diffExcelBody">
+                <tr><td colspan="6" class="empty-cell">暂无差异结果</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
       </section>
 
       <section id="aiReviewTaskPage" class="page-section">
@@ -3427,6 +3667,89 @@ button:disabled { opacity: .58; cursor: not-allowed; }
 .empty-cell { color: var(--muted); text-align: center; padding: 22px !important; }
 .pattern-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .pattern-actions button { min-height: 34px; padding: 0 10px; }
+.color-picker-block {
+  display: grid;
+  gap: 10px;
+}
+.preset-color-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.preset-color-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid #111827;
+  border-radius: 5px;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.12);
+  cursor: pointer;
+  position: relative;
+  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+.preset-color-btn::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  pointer-events: none;
+}
+.preset-color-btn.active {
+  border-color: #111827;
+  box-shadow: 0 0 0 2px rgba(17, 24, 39, 0.18), 0 1px 2px rgba(17, 24, 39, 0.14);
+  transform: translateY(-1px);
+}
+.preset-color-btn:hover {
+  transform: translateY(-1px);
+}
+.diff-inline-card {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.diff-inline-side {
+  border-radius: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+}
+.diff-inline-delete {
+  background: #fff4f2;
+  border-color: #f3c7c0;
+}
+.diff-inline-add {
+  background: #eefaf4;
+  border-color: #bfe4cb;
+}
+.diff-inline-label {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.diff-inline-delete .diff-inline-label { color: #b4443f; }
+.diff-inline-add .diff-inline-label { color: #1f6f68; }
+.diff-inline-text {
+  color: #24364d;
+  line-height: 1.7;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.diff-token {
+  padding: 1px 2px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+.diff-token-delete {
+  background: rgba(244, 67, 54, 0.16);
+  color: #9f2e29;
+}
+.diff-token-add {
+  background: rgba(76, 175, 80, 0.18);
+  color: #236a2d;
+}
 .summary-line { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; color: var(--muted); font-weight: 700; }
 .summary-line span {
   padding: 8px 12px;
@@ -4014,6 +4337,17 @@ let lastScanResult = null;
 let crossExcelScanState = null;
 let crossExcelSearchState = null;
 let crossExcelOutputFile = "";
+let diffExcelState = {
+  cacheFile: "",
+  resultId: "",
+  previewRecords: [],
+  meta: null,
+  outputFile: "",
+  totalCount: 0,
+  matchedCount: 0,
+  previewLimit: 1000,
+  previewTruncated: false,
+};
 let feedbackStatusState = { enabled: false, log_path: "output/log.txt", has_log_file: false };
 let feedbackScreenshotFile = null;
 let currentPageId = "toolGuidePage";
@@ -4041,6 +4375,14 @@ const TASK_STATUS_BY_PAGE = {
   },
   crossExcelPage: {
     taskLabel: "跨Excel搜索与合并",
+    pill: "空闲",
+    pillClass: "",
+    stageLabel: "未启动",
+    message: "等待开始任务",
+    active: false,
+  },
+  diffExcelPage: {
+    taskLabel: "Diff 工具",
     pill: "空闲",
     pillClass: "",
     stageLabel: "未启动",
@@ -4081,6 +4423,7 @@ const PAGE_TASK_LABELS = {
   promptSettingsPage: "文本预处理工具",
   runDetailsPage: "文本预处理工具",
   resultsPage: "文本预处理工具",
+  diffExcelPage: "Diff 工具",
   crossExcelPage: "跨Excel搜索与合并",
   aiReviewTaskPage: "AI 审校工具",
   aiReviewSettingsPage: "AI 审校工具",
@@ -4095,6 +4438,7 @@ const PAGE_HERO_COPY = {
   promptSettingsPage: { title: "提示词设置", lede: "按阶段维护默认提示词。" },
   runDetailsPage: { title: "运行详情", lede: "查看任务过程、统计和日志。" },
   resultsPage: { title: "结果", lede: "在这里查看导出结果和数量概览。" },
+  diffExcelPage: { title: "Excel差异比对", lede: "对比两个 Excel 文件或目录，查看差异、导出结果并批量标记。" },
   crossExcelPage: { title: "跨Excel搜索与合并", lede: "跨文件搜索整行内容，并按表头合并结果。" },
   aiReviewTaskPage: { title: "审校任务", lede: "导入文件、确认映射、查看预览并启动审校任务。" },
   aiReviewSettingsPage: { title: "审校设置", lede: "管理 AI 审校方式、定向审校模板与深度思考。" },
@@ -4107,6 +4451,7 @@ const PAGE_ACCORDION_KEYS = {
   promptSettingsPage: "text-preprocess",
   runDetailsPage: "text-preprocess",
   resultsPage: "text-preprocess",
+  diffExcelPage: "diff-tool",
   crossExcelPage: "cross-excel-search",
   aiReviewTaskPage: "ai-review-tool",
   aiReviewSettingsPage: "ai-review-tool",
@@ -4140,6 +4485,15 @@ const TOOL_GUIDES = {
       ["合并用法", ["选择要合并的表头列。", "点击“合并”。", "完成后打开输出文件或输出目录。"]],
     ],
   },
+  diffExcel: {
+    title: "Diff 工具",
+    sections: [
+      ["用途", "对比两个 Excel 文件，或两个目录下的同名 Excel 文件，快速找出所有差异单元格。"],
+      ["适合处理", ["版本更新前后文本表比对", "校对不同翻译包的改动", "批量定位某批修改是否已经写入表格"]],
+      ["基本用法", ["选择路径 A 和路径 B。", "点击“开始比对”。", "需要时导出差异结果，或把预览结果批量标记回原表。"]],
+      ["当前版本支持", ["文件对文件", "目录对目录同名配对", "差异导出", "批量高亮回写原表"]],
+    ],
+  },
 };
 
 const TOOL_KEY_BY_PAGE = {
@@ -4150,6 +4504,7 @@ const TOOL_KEY_BY_PAGE = {
   promptSettingsPage: "text_preprocess",
   runDetailsPage: "text_preprocess",
   resultsPage: "text_preprocess",
+  diffExcelPage: "diff_excel",
   aiReviewTaskPage: "ai_review",
   aiReviewSettingsPage: "ai_review",
   aiReviewForbiddenPage: "ai_review",
@@ -4548,6 +4903,172 @@ function renderCrossExcelSearchResults(data) {
       });
     });
     container.appendChild(card);
+  });
+}
+
+function renderDiffExcelSummary() {
+  const meta = diffExcelState.meta || {};
+  $("diffModeLabel").textContent = String(meta.mode_label || "未开始");
+  $("diffFilesInA").textContent = Number(meta.files_in_a || 0);
+  $("diffFilesInB").textContent = Number(meta.files_in_b || 0);
+  $("diffMatchedPairs").textContent = Number(meta.matched_pairs || 0);
+  $("diffTotalCount").textContent = Number(diffExcelState.totalCount || 0);
+  $("diffVisibleCount").textContent = Number(diffExcelState.matchedCount || 0);
+  $("diffOutputFile").textContent = diffExcelState.outputFile || "暂无输出";
+  $("diffOutputHint").textContent = diffExcelState.outputFile
+    ? "差异结果已导出，可以直接打开。"
+    : diffExcelState.previewTruncated
+      ? `当前只预览前 ${Number(diffExcelState.previewLimit || 1000)} 条，完整结果保存在本地缓存中。`
+      : "比对完成后可导出差异结果。";
+  $("exportDiffExcelButton").disabled = !diffExcelState.cacheFile || !Number(diffExcelState.totalCount || 0);
+  $("highlightDiffExcelButton").disabled = !(Array.isArray(diffExcelState.previewRecords) && diffExcelState.previewRecords.length);
+  $("openDiffOutputFileButton").disabled = !diffExcelState.outputFile;
+  $("openDiffOutputFolderButton").disabled = !diffExcelState.outputFile;
+}
+
+function buildDiffTokens(leftText, rightText) {
+  const left = String(leftText || "");
+  const right = String(rightText || "");
+  if (left === right) {
+    return {
+      leftHtml: escapeHtml(left) || "&nbsp;",
+      rightHtml: escapeHtml(right) || "&nbsp;",
+    };
+  }
+
+  let start = 0;
+  const maxPrefix = Math.min(left.length, right.length);
+  while (start < maxPrefix && left[start] === right[start]) {
+    start += 1;
+  }
+
+  let endLeft = left.length - 1;
+  let endRight = right.length - 1;
+  while (endLeft >= start && endRight >= start && left[endLeft] === right[endRight]) {
+    endLeft -= 1;
+    endRight -= 1;
+  }
+
+  const leftPrefix = left.slice(0, start);
+  const rightPrefix = right.slice(0, start);
+  const leftChanged = left.slice(start, endLeft + 1);
+  const rightChanged = right.slice(start, endRight + 1);
+  const leftSuffix = left.slice(endLeft + 1);
+  const rightSuffix = right.slice(endRight + 1);
+
+  const leftHtml = `${escapeHtml(leftPrefix)}${leftChanged ? `<span class="diff-token diff-token-delete">${escapeHtml(leftChanged)}</span>` : ""}${escapeHtml(leftSuffix)}` || "&nbsp;";
+  const rightHtml = `${escapeHtml(rightPrefix)}${rightChanged ? `<span class="diff-token diff-token-add">${escapeHtml(rightChanged)}</span>` : ""}${escapeHtml(rightSuffix)}` || "&nbsp;";
+  return {
+    leftHtml: leftHtml || "&nbsp;",
+    rightHtml: rightHtml || "&nbsp;",
+  };
+}
+
+function renderDiffExcelResults() {
+  const body = $("diffExcelBody");
+  const records = Array.isArray(diffExcelState.previewRecords) ? diffExcelState.previewRecords : [];
+  body.innerHTML = "";
+  if (!records.length) {
+    body.innerHTML = '<tr><td colspan="6" class="empty-cell">暂无差异结果</td></tr>';
+    renderDiffExcelSummary();
+    return;
+  }
+  records.forEach((item) => {
+    const tr = document.createElement("tr");
+    [item.filename_a || "", item.filename_b || "", item.sheet || "", item.cell_address || ""].forEach((value) => {
+      const td = document.createElement("td");
+      td.textContent = String(value || "");
+      tr.appendChild(td);
+    });
+
+    const diffTd = document.createElement("td");
+    const tokens = buildDiffTokens(item.value_a || "", item.value_b || "");
+    diffTd.innerHTML = `
+      <div class="diff-inline-card">
+        <div class="diff-inline-side diff-inline-delete">
+          <div class="diff-inline-label">A 删除</div>
+          <div class="diff-inline-text">${tokens.leftHtml}</div>
+        </div>
+        <div class="diff-inline-side diff-inline-add">
+          <div class="diff-inline-label">B 添加</div>
+          <div class="diff-inline-text">${tokens.rightHtml}</div>
+        </div>
+      </div>`;
+    tr.appendChild(diffTd);
+
+    const actionTd = document.createElement("td");
+    actionTd.innerHTML = `
+      <div class="table-actions">
+        <button type="button" class="mini-button diff-open-a">打开A</button>
+        <button type="button" class="mini-button diff-open-b">打开B</button>
+      </div>`;
+    actionTd.querySelector(".diff-open-a").addEventListener("click", () => openDiffExcelCell(item, "A"));
+    actionTd.querySelector(".diff-open-b").addEventListener("click", () => openDiffExcelCell(item, "B"));
+    tr.appendChild(actionTd);
+    body.appendChild(tr);
+  });
+  renderDiffExcelSummary();
+}
+
+async function applyDiffExcelFilter() {
+  if (!diffExcelState.cacheFile) {
+    diffExcelState.previewRecords = [];
+    diffExcelState.matchedCount = 0;
+    diffExcelState.previewTruncated = false;
+    renderDiffExcelResults();
+    return;
+  }
+  const data = await api(`/api/diff-excel/preview?cache_file=${encodeURIComponent(diffExcelState.cacheFile)}&query=&limit=${encodeURIComponent(String(diffExcelState.previewLimit || 1000))}`);
+  diffExcelState.previewRecords = Array.isArray(data.records) ? data.records : [];
+  diffExcelState.matchedCount = Number(data.matched_count || 0);
+  diffExcelState.previewTruncated = Boolean(data.preview_truncated);
+  renderDiffExcelResults();
+}
+
+function clearDiffExcelState() {
+  diffExcelState = {
+    cacheFile: "",
+    resultId: "",
+    previewRecords: [],
+    meta: null,
+    outputFile: "",
+    totalCount: 0,
+    matchedCount: 0,
+    previewLimit: 1000,
+    previewTruncated: false,
+  };
+  $("diffExcelHint").textContent = "";
+  $("diffHighlightHint").textContent = "";
+  renderDiffExcelResults();
+  setTaskStatus("diffExcelPage", {
+    active: false,
+    taskLabel: "Diff 工具",
+    pill: "空闲",
+    pillClass: "",
+    stageLabel: "未启动",
+    message: "等待开始任务",
+  });
+  renderCurrentTaskStatus();
+}
+
+function refreshDiffPresetColorButtons() {
+  const current = String($("diffHighlightColor").value || "#FFD966").toLowerCase();
+  document.querySelectorAll(".preset-color-btn").forEach((button) => {
+    const color = String(button.dataset.color || "").toLowerCase();
+    button.classList.toggle("active", color === current);
+    button.style.backgroundColor = color || "#FFD966";
+  });
+}
+
+async function openDiffExcelCell(item, target) {
+  const filePath = target === "A" ? item.file_path_a : item.file_path_b;
+  await api("/api/diff-excel/open-cell", {
+    method: "POST",
+    body: JSON.stringify({
+      file_path: filePath,
+      sheet_name: item.sheet || "",
+      cell_address: item.cell_address || "",
+    }),
   });
 }
 
@@ -6219,6 +6740,28 @@ async function chooseCrossExcelFolder() {
   }
 }
 
+async function chooseDiffFolder(side) {
+  const data = await api("/api/dialog/select-folder", { method: "POST", body: "{}" });
+  if (!data.cancelled && data.folder_path) {
+    if (side === "A") {
+      $("diffPathA").value = data.folder_path;
+    } else {
+      $("diffPathB").value = data.folder_path;
+    }
+  }
+}
+
+async function chooseDiffFile(side) {
+  const data = await api("/api/dialog/select-review-file");
+  if (!data.cancelled && data.file_path) {
+    if (side === "A") {
+      $("diffPathA").value = data.file_path;
+    } else {
+      $("diffPathB").value = data.file_path;
+    }
+  }
+}
+
 async function scanCrossExcelFolder() {
   const folder = $("crossExcelFolderPath").value.trim();
   if (!folder) {
@@ -6380,6 +6923,113 @@ async function mergeCrossExcel() {
   }
 }
 
+async function startDiffExcel() {
+  const pathA = $("diffPathA").value.trim();
+  const pathB = $("diffPathB").value.trim();
+  if (!pathA || !pathB) {
+    $("diffExcelHint").textContent = "请先选择路径 A 和路径 B。";
+    return;
+  }
+  $("diffExcelHint").textContent = "比对中...";
+  setTaskStatus("diffExcelPage", {
+    active: true,
+    taskLabel: "Diff 工具",
+    pill: "运行中",
+    pillClass: "running",
+    stageLabel: "Excel差异比对",
+    message: "正在读取并比较两个路径",
+  });
+  renderCurrentTaskStatus();
+  try {
+    const data = await api("/api/diff-excel/compare", {
+      method: "POST",
+      body: JSON.stringify({
+        path_a: pathA,
+        path_b: pathB,
+      }),
+    });
+    diffExcelState.cacheFile = String(data.cache_file || "");
+    diffExcelState.resultId = String(data.result_id || "");
+    diffExcelState.previewRecords = Array.isArray(data.preview_records) ? data.preview_records : [];
+    diffExcelState.meta = data.meta || null;
+    diffExcelState.outputFile = "";
+    diffExcelState.totalCount = Number(data.total_count || 0);
+    diffExcelState.matchedCount = Number(data.total_count || 0);
+    diffExcelState.previewLimit = Number(data.preview_limit || 1000);
+    diffExcelState.previewTruncated = Boolean(data.preview_truncated);
+    $("diffExcelHint").textContent = diffExcelState.previewTruncated
+      ? `比对完成，共找到 ${diffExcelState.totalCount} 处差异，当前仅预览前 ${diffExcelState.previewLimit} 条。`
+      : `比对完成，共找到 ${diffExcelState.totalCount} 处差异。`;
+    renderDiffExcelResults();
+    setTaskStatus("diffExcelPage", {
+      active: false,
+      taskLabel: "Diff 工具",
+      pill: "空闲",
+      pillClass: "",
+      stageLabel: "比对完成",
+      message: `已找到 ${diffExcelState.totalCount} 处差异`,
+    });
+    renderCurrentTaskStatus();
+  } catch (error) {
+    $("diffExcelHint").textContent = error.message;
+    clearDiffExcelState();
+    setTaskStatus("diffExcelPage", {
+      active: false,
+      taskLabel: "Diff 工具",
+      pill: "失败",
+      pillClass: "failed",
+      stageLabel: "比对失败",
+      message: error.message,
+    });
+    renderCurrentTaskStatus();
+  }
+}
+
+async function exportDiffExcel() {
+  if (!diffExcelState.cacheFile || !Number(diffExcelState.totalCount || 0)) {
+    $("diffExcelHint").textContent = "当前没有可导出的差异。";
+    return;
+  }
+  $("diffExcelHint").textContent = "导出中...";
+  try {
+    const data = await api("/api/diff-excel/export", {
+      method: "POST",
+      body: JSON.stringify({
+        cache_file: diffExcelState.cacheFile,
+        query: "",
+        output_file: "",
+      }),
+    });
+    diffExcelState.outputFile = String(data.output_file || "");
+    $("diffExcelHint").textContent = "差异结果已导出。";
+    renderDiffExcelSummary();
+  } catch (error) {
+    $("diffExcelHint").textContent = error.message;
+  }
+}
+
+async function highlightDiffExcel() {
+  if (!(Array.isArray(diffExcelState.previewRecords) && diffExcelState.previewRecords.length)) {
+    $("diffHighlightHint").textContent = "当前没有可标记的预览结果。";
+    return;
+  }
+  $("diffHighlightHint").textContent = "标记中...";
+  try {
+    const data = await api("/api/diff-excel/highlight", {
+      method: "POST",
+      body: JSON.stringify({
+        cache_file: diffExcelState.cacheFile,
+        query: "",
+        target: $("diffMarkTarget").value,
+        color_hex: $("diffHighlightColor").value || "#FFD966",
+      }),
+    });
+    $("diffHighlightHint").textContent = `已标记 ${Number(data.changed_cells || 0)} 个单元格，涉及 ${Number(data.workbook_count || 0)} 个文件。`;
+  } catch (error) {
+    $("diffHighlightHint").textContent = error.message;
+  }
+}
+
 async function startTask() {
   const payload = {
     folder_path: $("folderPath").value.trim(),
@@ -6531,10 +7181,35 @@ $("pendingRuleClearSelectionButton").addEventListener("click", () => setAllPendi
 $("confirmPendingRuleImportButton").addEventListener("click", importPendingRules);
 $("chooseFolderButton").addEventListener("click", chooseFolder);
 $("chooseCrossExcelFolderButton").addEventListener("click", chooseCrossExcelFolder);
+$("chooseDiffPathAButton").addEventListener("click", () => chooseDiffFolder("A").catch((error) => {
+  $("diffExcelHint").textContent = error.message;
+}));
+$("chooseDiffPathBButton").addEventListener("click", () => chooseDiffFolder("B").catch((error) => {
+  $("diffExcelHint").textContent = error.message;
+}));
+$("chooseDiffFileAButton").addEventListener("click", () => chooseDiffFile("A").catch((error) => {
+  $("diffExcelHint").textContent = error.message;
+}));
+$("chooseDiffFileBButton").addEventListener("click", () => chooseDiffFile("B").catch((error) => {
+  $("diffExcelHint").textContent = error.message;
+}));
 $("scanButton").addEventListener("click", scanFolder);
 $("scanCrossExcelButton").addEventListener("click", scanCrossExcelFolder);
 $("searchCrossExcelButton").addEventListener("click", searchCrossExcel);
 $("mergeCrossExcelButton").addEventListener("click", mergeCrossExcel);
+$("startDiffExcelButton").addEventListener("click", startDiffExcel);
+$("clearDiffExcelButton").addEventListener("click", clearDiffExcelState);
+$("exportDiffExcelButton").addEventListener("click", exportDiffExcel);
+$("highlightDiffExcelButton").addEventListener("click", highlightDiffExcel);
+$("diffHighlightColor").addEventListener("input", refreshDiffPresetColorButtons);
+document.querySelectorAll(".preset-color-btn").forEach((button) => {
+  button.addEventListener("click", () => {
+    const color = String(button.dataset.color || "").trim();
+    if (!color) return;
+    $("diffHighlightColor").value = color;
+    refreshDiffPresetColorButtons();
+  });
+});
 $("selectAllCrossHeadersButton").addEventListener("click", () => setCrossExcelHeaderSelection(true));
 $("clearCrossHeadersButton").addEventListener("click", () => setCrossExcelHeaderSelection(false));
 $("chooseReviewFileButton").addEventListener("click", () => chooseAiReviewFile().catch((error) => {
@@ -6690,6 +7365,20 @@ $("openCrossExcelOutputFileButton").addEventListener("click", async () => {
     body: "{}",
   });
 });
+$("openDiffOutputFolderButton").addEventListener("click", async () => {
+  if (!diffExcelState.outputFile) return;
+  await api(`/api/results/open-folder?output_file=${encodeURIComponent(diffExcelState.outputFile)}`, {
+    method: "POST",
+    body: "{}",
+  });
+});
+$("openDiffOutputFileButton").addEventListener("click", async () => {
+  if (!diffExcelState.outputFile) return;
+  await api(`/api/results/open-file?output_file=${encodeURIComponent(diffExcelState.outputFile)}`, {
+    method: "POST",
+    body: "{}",
+  });
+});
 $("downloadResultButton").addEventListener("click", () => {
   if (!latestResultFile) return;
   window.location.href = `/api/results/download?output_file=${encodeURIComponent(latestResultFile)}`;
@@ -6728,6 +7417,7 @@ setPage("toolGuidePage");
 renderCrossExcelHeaders([]);
 renderCrossExcelSearchResults(null);
 setCrossExcelOutput("");
+refreshDiffPresetColorButtons();
 updateAiReviewModeVisibility();
 renderCurrentTaskStatus();
 Promise.all([
