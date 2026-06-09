@@ -88,6 +88,9 @@ if __package__:
     )
     from .feedback import FeedbackError, feedback_status, submit_feedback
     from .models import TaskInput, normalize_extraction_mode, sync_extraction_flags
+    from .open_utils import open_folder as open_path_folder
+    from .open_utils import open_path as open_any_path
+    from .open_utils import open_spreadsheet_cell
     from .nontrans import (
         NONTRANS_ELEMENT_TYPE_LABELS,
         NONTRANS_ROLE_LABELS,
@@ -186,6 +189,9 @@ else:
     )
     from term_extractor_app.feedback import FeedbackError, feedback_status, submit_feedback
     from term_extractor_app.models import TaskInput, normalize_extraction_mode, sync_extraction_flags
+    from term_extractor_app.open_utils import open_folder as open_path_folder
+    from term_extractor_app.open_utils import open_path as open_any_path
+    from term_extractor_app.open_utils import open_spreadsheet_cell
     from term_extractor_app.nontrans import (
         NONTRANS_ELEMENT_TYPE_LABELS,
         NONTRANS_ROLE_LABELS,
@@ -590,6 +596,7 @@ TOOL_OPEN_EVENT_MAP = {
     "text_preprocess": "tool_open.text_preprocess",
     "ai_review": "tool_open.ai_review",
     "cross_excel": "tool_open.cross_excel",
+    "diff_excel": "diff.open",
 }
 
 
@@ -881,13 +888,11 @@ def _save_builtin_nontrans_rules_to_library(rules_payload: list[BuiltinNonTransR
 
 
 def _open_local_file(path_text: str) -> None:
-    path = Path(path_text)
-    if not path.exists():
-        raise FileNotFoundError("文件不存在：{0}".format(path))
-    if os.name == "nt":
-        os.startfile(path)  # type: ignore[attr-defined]
-        return
-    subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(path)])
+    open_any_path(path_text)
+
+
+def _open_excel_cell(path_text: str, sheet_name: str, cell_address: str) -> None:
+    open_spreadsheet_cell(path_text, sheet_name, cell_address)
 
 
 def _ai_review_batch_response(batch_id: str, message: str) -> dict:
@@ -1452,22 +1457,29 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
 
     @app.post("/api/diff-excel/compare")
     async def diff_excel_compare(payload: DiffExcelComparePayload):
+        track_event("diff.compare.start")
         try:
-            track_event("task_action.diff_excel_compare")
+            path_a = Path(str(payload.path_a or "").strip())
+            path_b = Path(str(payload.path_b or "").strip())
+            if path_a.is_file() and path_b.is_file():
+                track_event("diff.mode.file_to_file")
+            elif path_a.is_dir() or path_b.is_dir():
+                track_event("diff.mode.folder_to_folder")
             result = run_diff_excel_compare_to_cache(
                 payload.path_a,
                 payload.path_b,
                 ignore_case=False,
                 trim_whitespace=False,
             )
+            track_event("diff.compare.success")
             return result
         except Exception as exc:
+            track_event("diff.compare.fail")
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/diff-excel/export")
     async def diff_excel_export(payload: DiffExcelExportPayload):
         try:
-            track_event("task_action.diff_excel_export")
             return export_diff_excel_cached_records(
                 payload.cache_file,
                 payload.output_file,
@@ -1479,7 +1491,7 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
     @app.post("/api/diff-excel/highlight")
     async def diff_excel_highlight(payload: DiffExcelHighlightPayload):
         try:
-            track_event("task_action.diff_excel_highlight")
+            track_event("diff.highlight")
             changed_cells, workbook_count = apply_diff_excel_highlight_from_cache(
                 payload.cache_file,
                 str(payload.target or "A"),
@@ -1511,7 +1523,8 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
         if not file_path or not sheet_name or not cell_address:
             raise HTTPException(status_code=400, detail="缺少定位所需的信息。")
         try:
-            _open_local_file(file_path)
+            track_event("diff.jump")
+            _open_excel_cell(file_path, sheet_name, cell_address)
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return {
@@ -2003,27 +2016,11 @@ def settings_to_json_for_debug() -> str:
 
 
 def open_file_location(path: Path) -> None:
-    if os.name == "nt":
-        os.startfile(str(path.parent))  # type: ignore[attr-defined]
-    elif os.name == "posix":
-        opener = "open" if sys_platform_is_darwin() else "xdg-open"
-        subprocess.Popen([opener, str(path.parent)])
-    else:
-        raise RuntimeError("Opening folders is not supported on this platform.")
+    open_path_folder(path.parent)
 
 
 def open_file_directly(path: Path) -> None:
-    if os.name == "nt":
-        os.startfile(str(path))  # type: ignore[attr-defined]
-    elif os.name == "posix":
-        opener = "open" if sys_platform_is_darwin() else "xdg-open"
-        subprocess.Popen([opener, str(path)])
-    else:
-        raise RuntimeError("Opening files is not supported on this platform.")
-
-
-def sys_platform_is_darwin() -> bool:
-    return os.sys.platform == "darwin"
+    open_any_path(path)
 
 
 def select_folder_dialog() -> str:
@@ -2212,7 +2209,7 @@ INDEX_HTML = """<!doctype html>
               <small id="resultState">等待任务完成。</small>
             </div>
             <div class="actions">
-              <button id="downloadResultButton" class="secondary" disabled>下载结果文件</button>
+              <button id="downloadResultButton" class="secondary" disabled>打开结果文件</button>
               <button id="openResultFolderButton" class="secondary" disabled>打开输出目录</button>
             </div>
             <label>输出文件路径<input id="outputFile" readonly /></label>
@@ -2647,7 +2644,7 @@ INDEX_HTML = """<!doctype html>
         <section class="card">
           <div class="card-title">
             <h3>差异预览</h3>
-            <p>点击打开可直接打开原文件。当前版本先打开文件本身，后续再补更细的单元格定位联动。</p>
+            <p>左侧显示 A 中被删掉的内容，右侧显示 B 中新增的内容。</p>
           </div>
           <div class="pattern-table-wrap">
             <table class="pattern-table">
@@ -2658,11 +2655,10 @@ INDEX_HTML = """<!doctype html>
                   <th>Sheet</th>
                   <th>单元格</th>
                   <th>差异对照</th>
-                  <th>打开</th>
                 </tr>
               </thead>
               <tbody id="diffExcelBody">
-                <tr><td colspan="6" class="empty-cell">暂无差异结果</td></tr>
+                <tr><td colspan="5" class="empty-cell">暂无差异结果</td></tr>
               </tbody>
             </table>
           </div>
@@ -3714,6 +3710,15 @@ button:disabled { opacity: .58; cursor: not-allowed; }
   border-radius: 12px;
   padding: 10px 12px;
   border: 1px solid var(--line);
+  cursor: pointer;
+  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+.diff-inline-side:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(17, 24, 39, 0.08);
+}
+.diff-inline-side:active {
+  transform: translateY(0);
 }
 .diff-inline-delete {
   background: #fff4f2;
@@ -3736,6 +3741,12 @@ button:disabled { opacity: .58; cursor: not-allowed; }
   line-height: 1.7;
   word-break: break-word;
   white-space: pre-wrap;
+}
+.diff-inline-empty {
+  color: #9aa7b6;
+}
+.diff-plain-token {
+  color: inherit;
 }
 .diff-token {
   padding: 1px 2px;
@@ -4927,40 +4938,84 @@ function renderDiffExcelSummary() {
 }
 
 function buildDiffTokens(leftText, rightText) {
-  const left = String(leftText || "");
-  const right = String(rightText || "");
-  if (left === right) {
+  function splitChars(text) {
+    return Array.from(String(text || ""));
+  }
+
+  function buildLcsMatrix(leftTokens, rightTokens) {
+    const rows = leftTokens.length + 1;
+    const cols = rightTokens.length + 1;
+    const matrix = Array.from({ length: rows }, () => new Uint16Array(cols));
+    for (let i = leftTokens.length - 1; i >= 0; i -= 1) {
+      for (let j = rightTokens.length - 1; j >= 0; j -= 1) {
+        if (leftTokens[i] === rightTokens[j]) {
+          matrix[i][j] = matrix[i + 1][j + 1] + 1;
+        } else {
+          matrix[i][j] = Math.max(matrix[i + 1][j], matrix[i][j + 1]);
+        }
+      }
+    }
+    return matrix;
+  }
+
+  function tokensToDiffHtml(parts, changedClass) {
+    if (!parts.length) {
+      return '<span class="diff-inline-empty">无</span>';
+    }
+    return parts.map((part) => {
+      const html = escapeHtml(part.text || "");
+      if (!html) {
+        return "";
+      }
+      if (part.changed) {
+        return `<span class="diff-token ${changedClass}">${html}</span>`;
+      }
+      return `<span class="diff-plain-token">${html}</span>`;
+    }).join("");
+  }
+
+  const leftTokens = splitChars(leftText);
+  const rightTokens = splitChars(rightText);
+  if (!leftTokens.length && !rightTokens.length) {
     return {
-      leftHtml: escapeHtml(left) || "&nbsp;",
-      rightHtml: escapeHtml(right) || "&nbsp;",
+      leftHtml: '<span class="diff-inline-empty">无</span>',
+      rightHtml: '<span class="diff-inline-empty">无</span>',
     };
   }
 
-  let start = 0;
-  const maxPrefix = Math.min(left.length, right.length);
-  while (start < maxPrefix && left[start] === right[start]) {
-    start += 1;
+  const matrix = buildLcsMatrix(leftTokens, rightTokens);
+  const leftParts = [];
+  const rightParts = [];
+  let i = 0;
+  let j = 0;
+  while (i < leftTokens.length && j < rightTokens.length) {
+    if (leftTokens[i] === rightTokens[j]) {
+      leftParts.push({ text: leftTokens[i], changed: false });
+      rightParts.push({ text: rightTokens[j], changed: false });
+      i += 1;
+      j += 1;
+      continue;
+    }
+    if (matrix[i + 1][j] >= matrix[i][j + 1]) {
+      leftParts.push({ text: leftTokens[i], changed: true });
+      i += 1;
+    } else {
+      rightParts.push({ text: rightTokens[j], changed: true });
+      j += 1;
+    }
+  }
+  while (i < leftTokens.length) {
+    leftParts.push({ text: leftTokens[i], changed: true });
+    i += 1;
+  }
+  while (j < rightTokens.length) {
+    rightParts.push({ text: rightTokens[j], changed: true });
+    j += 1;
   }
 
-  let endLeft = left.length - 1;
-  let endRight = right.length - 1;
-  while (endLeft >= start && endRight >= start && left[endLeft] === right[endRight]) {
-    endLeft -= 1;
-    endRight -= 1;
-  }
-
-  const leftPrefix = left.slice(0, start);
-  const rightPrefix = right.slice(0, start);
-  const leftChanged = left.slice(start, endLeft + 1);
-  const rightChanged = right.slice(start, endRight + 1);
-  const leftSuffix = left.slice(endLeft + 1);
-  const rightSuffix = right.slice(endRight + 1);
-
-  const leftHtml = `${escapeHtml(leftPrefix)}${leftChanged ? `<span class="diff-token diff-token-delete">${escapeHtml(leftChanged)}</span>` : ""}${escapeHtml(leftSuffix)}` || "&nbsp;";
-  const rightHtml = `${escapeHtml(rightPrefix)}${rightChanged ? `<span class="diff-token diff-token-add">${escapeHtml(rightChanged)}</span>` : ""}${escapeHtml(rightSuffix)}` || "&nbsp;";
   return {
-    leftHtml: leftHtml || "&nbsp;",
-    rightHtml: rightHtml || "&nbsp;",
+    leftHtml: tokensToDiffHtml(leftParts, "diff-token-delete"),
+    rightHtml: tokensToDiffHtml(rightParts, "diff-token-add"),
   };
 }
 
@@ -4969,7 +5024,7 @@ function renderDiffExcelResults() {
   const records = Array.isArray(diffExcelState.previewRecords) ? diffExcelState.previewRecords : [];
   body.innerHTML = "";
   if (!records.length) {
-    body.innerHTML = '<tr><td colspan="6" class="empty-cell">暂无差异结果</td></tr>';
+    body.innerHTML = '<tr><td colspan="5" class="empty-cell">暂无差异结果</td></tr>';
     renderDiffExcelSummary();
     return;
   }
@@ -4985,26 +5040,18 @@ function renderDiffExcelResults() {
     const tokens = buildDiffTokens(item.value_a || "", item.value_b || "");
     diffTd.innerHTML = `
       <div class="diff-inline-card">
-        <div class="diff-inline-side diff-inline-delete">
+        <div class="diff-inline-side diff-inline-delete" title="点击跳转到文件 A 的对应单元格">
           <div class="diff-inline-label">A 删除</div>
           <div class="diff-inline-text">${tokens.leftHtml}</div>
         </div>
-        <div class="diff-inline-side diff-inline-add">
+        <div class="diff-inline-side diff-inline-add" title="点击跳转到文件 B 的对应单元格">
           <div class="diff-inline-label">B 添加</div>
           <div class="diff-inline-text">${tokens.rightHtml}</div>
         </div>
       </div>`;
+    diffTd.querySelector(".diff-inline-delete").addEventListener("click", () => openDiffExcelCell(item, "A"));
+    diffTd.querySelector(".diff-inline-add").addEventListener("click", () => openDiffExcelCell(item, "B"));
     tr.appendChild(diffTd);
-
-    const actionTd = document.createElement("td");
-    actionTd.innerHTML = `
-      <div class="table-actions">
-        <button type="button" class="mini-button diff-open-a">打开A</button>
-        <button type="button" class="mini-button diff-open-b">打开B</button>
-      </div>`;
-    actionTd.querySelector(".diff-open-a").addEventListener("click", () => openDiffExcelCell(item, "A"));
-    actionTd.querySelector(".diff-open-b").addEventListener("click", () => openDiffExcelCell(item, "B"));
-    tr.appendChild(actionTd);
     body.appendChild(tr);
   });
   renderDiffExcelSummary();
@@ -7379,9 +7426,12 @@ $("openDiffOutputFileButton").addEventListener("click", async () => {
     body: "{}",
   });
 });
-$("downloadResultButton").addEventListener("click", () => {
+$("downloadResultButton").addEventListener("click", async () => {
   if (!latestResultFile) return;
-  window.location.href = `/api/results/download?output_file=${encodeURIComponent(latestResultFile)}`;
+  await api(`/api/results/open-file?output_file=${encodeURIComponent(latestResultFile)}`, {
+    method: "POST",
+    body: "{}",
+  });
 });
 $("openResultFolderButton").addEventListener("click", async () => {
   if (!latestResultFile) return;
@@ -7442,3 +7492,4 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="127.0.0.1", port=8765, access_log=False)
+

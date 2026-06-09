@@ -12,9 +12,9 @@
       "enabled": true,
       "order_index": 1,
       "examples": [
-        "<size=150%>",
-        "<div>",
-        "<bad_tag>"
+        "<color=#52a500>",
+        "<color=#f07100>",
+        "<color=#ff9de4>"
       ],
       "source": "builtin",
       "conflict_notes": ""
@@ -30,9 +30,9 @@
       "enabled": true,
       "order_index": 2,
       "examples": [
-        "<player_name color=\"#FF0000\" />",
-        "<status_icon type='poison' duration=5 />",
-        "<buff_add val=\"+15%\" />"
+        "<title_badge id=\"king_2026\" />",
+        "<speed_boost multiplier=\"1.5\" />",
+        "<timer counts=10 />"
       ],
       "source": "builtin",
       "conflict_notes": ""
@@ -48,9 +48,9 @@
       "enabled": true,
       "order_index": 3,
       "examples": [
-        "</b>",
         "</size>",
-        "</div>"
+        "</div>",
+        "</color>"
       ],
       "source": "builtin",
       "conflict_notes": ""
@@ -84,9 +84,9 @@
       "enabled": true,
       "order_index": 5,
       "examples": [
-        "{net_ping}",
-        "{guild.name}",
-        "{guild.id}"
+        "{2}",
+        "{3}",
+        "{4}"
       ],
       "source": "builtin",
       "conflict_notes": ""

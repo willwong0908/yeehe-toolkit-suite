@@ -201,6 +201,54 @@ class TermExtractionService:
             for message in list(messages or [])
         ]
 
+    @staticmethod
+    def _pretty_json_text(payload: object) -> str:
+        try:
+            return json.dumps(payload, ensure_ascii=False, indent=2)
+        except Exception:
+            return str(payload)
+
+    def _log_llm_exchange_detail(self, request, response) -> None:
+        stage = str(request.metadata.get("stage", request.task_type) or request.task_type)
+        request_messages = self._full_messages(getattr(request, "messages", []) or [])
+        request_prompt = str(getattr(request, "prompt", "") or "")
+        request_detail = {
+            "stage": stage,
+            "task_id": str(getattr(request, "task_id", "") or ""),
+            "task_type": str(getattr(request, "task_type", "") or ""),
+            "attempt": int(getattr(response, "attempts", 1) or 1),
+            "messages": request_messages,
+            "prompt": request_prompt,
+            "metadata": dict(getattr(request, "metadata", {}) or {}),
+        }
+        response_detail = {
+            "stage": stage,
+            "task_id": str(getattr(response, "task_id", "") or ""),
+            "task_type": str(getattr(response, "task_type", "") or ""),
+            "provider": str(getattr(response, "provider", "") or ""),
+            "model": str(getattr(response, "model", "") or ""),
+            "latency_ms": int(getattr(response, "latency_ms", 0) or 0),
+            "attempt": int(getattr(response, "attempts", 1) or 1),
+            "success": bool(getattr(response, "success", False)),
+            "error": str(getattr(response, "error", "") or ""),
+            "error_type": str(getattr(response, "error_type", "") or ""),
+            "retryable": bool(getattr(response, "retryable", False)),
+            "response_metadata": dict(getattr(response, "response_metadata", {}) or {}),
+            "content": str(getattr(response, "content", "") or ""),
+        }
+        self._log(
+            "REQUEST DETAIL [{0}]\n{1}".format(
+                str(getattr(request, "task_id", "") or ""),
+                self._pretty_json_text(request_detail),
+            )
+        )
+        self._log(
+            "RESPONSE DETAIL [{0}]\n{1}".format(
+                str(getattr(response, "task_id", "") or ""),
+                self._pretty_json_text(response_detail),
+            )
+        )
+
     def _emit_progress(self, runtime: RuntimeTaskState, **extra) -> None:
         payload = {
             "stage": runtime.stage,
@@ -1927,6 +1975,7 @@ class TermExtractionService:
                 len(response_content),
             )
         )
+        self._log_llm_exchange_detail(request, response)
         if str(getattr(response, "error", "") or "").strip():
             self._log("Response error: {0}".format(str(getattr(response, "error", "") or "")), level="warning")
         return result_handler(runtime, request, response, snapshot)

@@ -2286,7 +2286,8 @@ def save_results_to_excel(
     approved_df = pd.DataFrame(approved_rows, columns=TERM_LIBRARY_COLUMNS)
     review_df = pd.DataFrame(review_rows, columns=REVIEW_COLUMNS)
     failure_df = pd.DataFrame(failed_items, columns=FAILURE_COLUMNS)
-    nontrans_df = pd.DataFrame(nontrans_regex_rows or [], columns=NONTRANS_REGEX_COLUMNS)
+    nontrans_columns = list((nontrans_regex_rows or [{}])[0].keys()) if nontrans_regex_rows else list(NONTRANS_REGEX_COLUMNS[:2]) + list(NONTRANS_REGEX_COLUMNS[-2:])
+    nontrans_df = pd.DataFrame(nontrans_regex_rows or [], columns=nontrans_columns)
 
     with pd.ExcelWriter(filename, engine="openpyxl") as writer:
         approved_df.to_excel(writer, sheet_name=TERM_LIBRARY_SHEET, index=False)
@@ -2303,8 +2304,10 @@ def save_nontrans_regex_to_excel(
 ) -> Path:
     output_folder.mkdir(parents=True, exist_ok=True)
     filename = output_folder / "非译元素正则_{0}.xlsx".format(time.strftime("%Y%m%d%H%M%S"))
-    nontrans_df = pd.DataFrame(nontrans_regex_rows, columns=NONTRANS_REGEX_COLUMNS)
+    nontrans_columns = list(nontrans_regex_rows[0].keys()) if nontrans_regex_rows else list(NONTRANS_REGEX_COLUMNS[:2]) + list(NONTRANS_REGEX_COLUMNS[-2:])
+    nontrans_df = pd.DataFrame(nontrans_regex_rows, columns=nontrans_columns)
     with pd.ExcelWriter(filename, engine="openpyxl") as writer:
         nontrans_df.to_excel(writer, sheet_name=NONTRANS_REGEX_SHEET, index=False)
     return filename
+
 

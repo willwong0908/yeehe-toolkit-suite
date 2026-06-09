@@ -1,4 +1,4 @@
-"""Non-translatable element rules and protection helpers."""
+﻿"""Non-translatable element rules and protection helpers."""
 
 from __future__ import annotations
 
@@ -1185,18 +1185,18 @@ def build_term_recall_dedupe_key(protected_text: str, placeholder_pattern: str =
 
 
 def build_nontrans_regex_sheet_rows(rows: Sequence[NonTransRegexRow]) -> List[Dict[str, object]]:
+    columns = list(NONTRANS_REGEX_COLUMNS[:2]) + list(NONTRANS_REGEX_COLUMNS[-2:])
     sheet_rows = []
     for index, row in enumerate(rows, start=1):
         sheet_rows.append(
             {
-                "排序": index,
-                "正则表达式": row.regex,
-                "开始/结束/空": NONTRANS_ROLE_LABELS.get(row.role, row.role),
-                "类型": NONTRANS_ELEMENT_TYPE_LABELS.get(row.element_type, row.element_type),
-                "非译元素例子": "、".join(_preserve_unique(row.examples)[:8]),
+                columns[0]: index,
+                columns[1]: row.regex,
+                columns[2]: NONTRANS_ELEMENT_TYPE_LABELS.get(row.element_type, row.element_type),
+                columns[3]: "、".join(_preserve_unique(row.examples)[:8]),
             }
         )
-    return [{column: item.get(column, "") for column in NONTRANS_REGEX_COLUMNS} for item in sheet_rows]
+    return [{column: item.get(column, "") for column in columns} for item in sheet_rows]
 
 
 def attach_runtime_examples_to_nontrans_rows(

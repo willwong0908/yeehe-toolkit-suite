@@ -110,7 +110,7 @@
     "DeepSeek": {
       "api_key": "",
       "base_url": "https://api.deepseek.com/v1",
-      "model": "deepseek-chat",
+      "model": "deepseek-v4-flash",
       "timeout_seconds": 90,
       "max_concurrency": 6,
       "extra_headers": {},

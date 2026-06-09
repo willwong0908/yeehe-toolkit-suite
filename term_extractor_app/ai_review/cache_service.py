@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import os
-import shutil
 import uuid
 from pathlib import Path
 from typing import Any
 
 from .config import UPLOADS_DIR, ensure_directories
 from .database import dumps_json, get_connection, loads_json, utc_now
+from ..open_utils import open_folder
 
 
 def save_upload_file(filename: str, data: bytes) -> Path:
@@ -172,15 +172,7 @@ def clear_read_cache() -> None:
 
 
 def open_directory(path: str | os.PathLike[str]) -> None:
-    directory = Path(path)
-    if not directory.exists():
-        directory.mkdir(parents=True, exist_ok=True)
-    if os.name == "nt":
-        os.startfile(directory)  # type: ignore[attr-defined]
-    elif shutil.which("open"):
-        os.system(f'open "{directory}"')
-    elif shutil.which("xdg-open"):
-        os.system(f'xdg-open "{directory}"')
+    open_folder(path)
 
 
 def _batch_to_dict(row: Any) -> dict[str, Any]:
