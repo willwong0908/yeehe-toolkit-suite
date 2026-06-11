@@ -731,15 +731,42 @@ def _track_ai_review_finish(config: dict[str, Any], *, success: bool) -> None:
 
 
 def _task_to_dict(row: Any) -> dict[str, Any]:
+    total_count = int(row["total_count"] or 0)
+    completed_count = int(row["completed_count"] or 0)
+    failed_count = int(row["failed_count"] or 0)
+    requested_count = int(row["requested_count"] or 0)
+    status = str(row["status"] or "")
+    progress_percent = round((completed_count / total_count) * 100) if total_count > 0 else 0
+    status_label_map = {
+        "pending": "等待开始",
+        "running": "审校中",
+        "completed": "已完成",
+        "completed_with_errors": "已完成，有失败",
+        "failed": "失败",
+    }
+    status_label = status_label_map.get(status, status or "未开始")
+    if status in {"completed", "completed_with_errors"}:
+        message = f"已处理 {completed_count}/{total_count}"
+    elif status == "running":
+        message = f"正在审校 {completed_count}/{total_count}"
+    elif status == "failed":
+        message = "审校失败"
+    else:
+        message = "等待开始"
     return {
         "id": row["id"],
         "batch_id": row["batch_id"],
-        "status": row["status"],
-        "total_count": row["total_count"],
+        "status": status,
+        "status_label": status_label,
+        "message": message,
+        "total_count": total_count,
         "cached_count": row["cached_count"],
-        "requested_count": row["requested_count"],
-        "completed_count": row["completed_count"],
-        "failed_count": row["failed_count"],
+        "requested_count": requested_count,
+        "completed_count": completed_count,
+        "failed_count": failed_count,
+        "progress_current": completed_count,
+        "progress_total": total_count,
+        "progress_percent": max(0, min(100, progress_percent)),
         "output_path": row["output_path"],
         "config": loads_json(row["config_json"], {}),
         "created_at": row["created_at"],

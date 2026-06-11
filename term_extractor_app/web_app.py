@@ -2743,6 +2743,13 @@ INDEX_HTML = """<!doctype html>
               <h3>审校进度</h3>
               <p id="reviewProgress">尚未开始</p>
             </div>
+            <div class="metrics hero-metrics">
+              <div><span>进度</span><strong id="reviewProgressPercent">未开始</strong></div>
+              <div><span>已处理</span><strong id="reviewProgressCount">0 / 0</strong></div>
+              <div><span>失败</span><strong id="reviewFailedCount">0</strong></div>
+              <div><span>请求</span><strong id="reviewRequestedCount">0</strong></div>
+            </div>
+            <div class="progress"><span id="reviewProgressBar"></span></div>
             <div id="outputPanel" class="result-file hidden">
               <span>结果文件</span>
               <strong id="outputPath">暂无输出</strong>
@@ -5241,6 +5248,20 @@ function clearAiReviewTaskHint() {
   $("reviewTaskHint").textContent = "";
 }
 
+function renderAiReviewProgress(task = {}) {
+  const total = Math.max(0, Number(task.progress_total ?? task.total_count ?? 0));
+  const current = Math.max(0, Number(task.progress_current ?? task.completed_count ?? 0));
+  const safeCurrent = total > 0 ? Math.min(current, total) : current;
+  const percent = total > 0 ? Math.min(100, Math.max(0, Math.round((safeCurrent / total) * 100))) : 0;
+  const isActive = ["pending", "running"].includes(String(task.status || ""));
+  $("reviewProgress").textContent = String(task.status_label || task.status || "尚未开始");
+  $("reviewProgressPercent").textContent = total > 0 ? `${percent}%` : isActive ? "0%" : "未开始";
+  $("reviewProgressCount").textContent = `${safeCurrent} / ${total}`;
+  $("reviewFailedCount").textContent = Number(task.failed_count || 0);
+  $("reviewRequestedCount").textContent = Number(task.requested_count || 0);
+  $("reviewProgressBar").style.width = total > 0 ? `${percent}%` : "0";
+}
+
 function summarizeAiReviewExcelMapping(mapping) {
   const sheets = Array.isArray(mapping?.sheets) ? mapping.sheets : [];
   const count = sheets.reduce((total, sheet) => total + Number((sheet.mappings || []).length || 0), 0);
@@ -5726,7 +5747,7 @@ async function saveForbiddenTemplateFromDialog() {
 function renderAiReviewResults(task, results) {
   renderAiReviewResultHead(task || {});
   const outputFile = String(task?.output_path || task?.output_file || "");
-  $("reviewProgress").textContent = String(task?.status_label || task?.status || "尚未开始");
+  renderAiReviewProgress(task || {});
   $("outputPath").textContent = outputFile || "暂无输出";
   $("outputPanel").classList.toggle("hidden", !outputFile);
   $("openOutputFileButton").disabled = !outputFile;
@@ -5911,7 +5932,7 @@ function resetAiReviewTaskView() {
   $("outputPanel").classList.add("hidden");
   $("outputPath").textContent = "暂无输出";
   $("openOutputFileButton").disabled = true;
-  $("reviewProgress").textContent = "尚未开始";
+  renderAiReviewProgress({});
   $("reviewTaskHint").textContent = "";
 }
 
@@ -5941,6 +5962,7 @@ async function startAiReviewTask() {
   aiReviewLogCursor = 0;
   $("reviewLogList").innerHTML = "";
   $("reviewTaskHint").textContent = data.message || "审校任务已启动";
+  renderAiReviewProgress(data?.task || {});
   setAiReviewTaskStatus({
     active: true,
     pill: "运行中",
@@ -5963,11 +5985,12 @@ async function pollAiReviewTask() {
   renderAiReviewResults(data.task || {}, data.results || []);
   const task = data.task || {};
   const status = String(task.status || "");
-  const done = status === "completed" || status === "failed";
+  const done = ["completed", "completed_with_errors", "failed"].includes(status);
+  const hasFailedItems = Number(task.failed_count || 0) > 0 || status === "completed_with_errors";
   setAiReviewTaskStatus({
     active: !done,
-    pill: status === "failed" ? "失败" : done ? "空闲" : "运行中",
-    pillClass: status === "failed" ? "failed" : done ? "" : "running",
+    pill: status === "failed" ? "失败" : hasFailedItems ? "有失败" : done ? "空闲" : "运行中",
+    pillClass: status === "failed" || hasFailedItems ? "failed" : done ? "" : "running",
     stageLabel: String(task.status_label || task.status || "审校中"),
     message: String(task.message || task.status_label || "正在执行 AI 审校"),
   });
