@@ -65,6 +65,7 @@ if __package__:
     from .ai_review.review_service import (
         ReviewTaskError,
         create_review_task,
+        get_review_issue_results,
         get_review_logs,
         get_review_results,
         get_review_task,
@@ -162,6 +163,7 @@ else:
     from term_extractor_app.ai_review.review_service import (
         ReviewTaskError,
         create_review_task,
+        get_review_issue_results,
         get_review_logs,
         get_review_results,
         get_review_task,
@@ -1902,6 +1904,13 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="审校任务不存在")
         return {"logs": get_review_logs(task_id, after_id)}
 
+    @app.get("/api/ai-review/tasks/{task_id}/issue-results")
+    async def ai_review_task_issue_results(task_id: str):
+        task = get_review_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="审校任务不存在")
+        return {"task": task, "results": get_review_issue_results(task_id)}
+
     @app.post("/api/ai-review/outputs/open-folder")
     async def ai_review_open_outputs():
         try:
@@ -2766,8 +2775,11 @@ INDEX_HTML = """<!doctype html>
 
         <section class="card">
           <div class="card-title">
-            <h3>审校结果预览</h3>
-            <p>展示前 20 条结果，完整结果会自动保存为 Excel。</p>
+            <div>
+              <h3>审校结果预览</h3>
+              <p>展示前 20 条结果，完整结果会自动保存为 Excel。</p>
+            </div>
+            <button id="openReviewDetailButton" class="secondary" type="button" disabled>详情</button>
           </div>
           <div class="pattern-table-wrap">
             <table class="pattern-table">
@@ -2867,6 +2879,27 @@ INDEX_HTML = """<!doctype html>
       <div class="modal-footer">
         <span id="pendingRuleHint" class="hint"></span>
         <button id="confirmPendingRuleImportButton" class="primary" type="button">导入到内置规则库</button>
+      </div>
+    </div>
+  </div>
+  <div id="reviewDetailOverlay" class="modal-overlay" hidden>
+    <div class="modal-card review-detail-modal">
+      <div class="modal-header">
+        <div>
+          <h3>问题详情</h3>
+          <p id="reviewDetailSummary">暂无问题条目</p>
+        </div>
+        <button id="closeReviewDetailButton" class="modal-close" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="pattern-table-wrap review-detail-wrap">
+        <table class="pattern-table review-detail-table">
+          <thead id="reviewDetailHead">
+            <tr><th>原文</th><th>原译文</th><th>修改建议</th></tr>
+          </thead>
+          <tbody id="reviewDetailBody">
+            <tr><td colspan="3" class="empty-cell">暂无问题条目</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -3652,6 +3685,56 @@ button:disabled { opacity: .58; cursor: not-allowed; }
 .pending-rule-table td:nth-child(4) { width: 92px; }
 .pending-rule-table th:nth-child(5),
 .pending-rule-table td:nth-child(5) { width: 360px; }
+.modal-card.review-detail-modal {
+  width: calc(100vw - 28px);
+  height: calc(100vh - 28px);
+  max-height: calc(100vh - 28px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.review-detail-wrap {
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
+}
+.review-detail-table {
+  min-width: 1280px;
+  table-layout: fixed;
+}
+.review-detail-table th:nth-child(1),
+.review-detail-table td:nth-child(1) {
+  width: 20%;
+}
+.review-detail-table th:nth-child(2),
+.review-detail-table td:nth-child(2) {
+  width: 20%;
+}
+.review-detail-table th:nth-child(3),
+.review-detail-table td:nth-child(3) {
+  width: 20%;
+}
+.review-detail-table th:nth-child(4),
+.review-detail-table td:nth-child(4) {
+  width: 20%;
+}
+.review-detail-table th:nth-child(5),
+.review-detail-table td:nth-child(5) {
+  width: 20%;
+}
+.review-detail-table td {
+  vertical-align: top;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.review-diff-cell .diff-inline-side {
+  min-height: 0;
+  padding: 10px;
+  border-radius: 10px;
+}
+.review-diff-cell .diff-inline-label {
+  margin-bottom: 6px;
+}
 .builtin-preview-table { table-layout: fixed; }
 .builtin-preview-table th:nth-child(1),
 .builtin-preview-table td:nth-child(1) { width: 68px; }
@@ -4372,6 +4455,7 @@ let currentPageId = "toolGuidePage";
 let lastTrackedToolKey = "";
 let aiReviewBatch = null;
 let aiReviewTaskId = "";
+let aiReviewCurrentTask = null;
 let aiReviewLogCursor = 0;
 let aiReviewTaskPoller = null;
 let aiReviewPromptTemplates = [];
@@ -5745,12 +5829,14 @@ async function saveForbiddenTemplateFromDialog() {
 }
 
 function renderAiReviewResults(task, results) {
+  aiReviewCurrentTask = task || null;
   renderAiReviewResultHead(task || {});
   const outputFile = String(task?.output_path || task?.output_file || "");
   renderAiReviewProgress(task || {});
   $("outputPath").textContent = outputFile || "暂无输出";
   $("outputPanel").classList.toggle("hidden", !outputFile);
   $("openOutputFileButton").disabled = !outputFile;
+  $("openReviewDetailButton").disabled = !task?.id;
 
   const body = $("reviewResultBody");
   body.innerHTML = "";
@@ -5779,6 +5865,7 @@ function renderAiReviewResults(task, results) {
       cells = [
         item.source_text || "",
         item.target_text || "",
+        item.suggestion || "",
         ...reviewTypes.map((reviewType) => {
           const key = String(reviewType?.key || "");
           return item.error_message || checks[key] || "";
@@ -5815,7 +5902,7 @@ function renderAiReviewResultHead(task) {
   const headers = isForbiddenOnly
     ? ["原文", "译文", "禁用词检查情况"]
     : isDirectional
-      ? ["原文", "译文", ...reviewTypes.map((item) => String(item?.key || ""))]
+      ? ["原文", "译文", "修改建议", ...reviewTypes.map((item) => String(item?.key || ""))]
       : ["原文", "译文", "是否有问题", "问题类型", "问题说明", "修改建议"];
   if (hasForbidden && !isForbiddenOnly) {
     headers.push("禁用词检查情况");
@@ -5829,6 +5916,114 @@ function renderAiReviewResultHead(task) {
     tr.appendChild(th);
   });
   head.appendChild(tr);
+}
+
+function reviewDetailExtraHeaders(task) {
+  return ["问题类型", "问题说明"];
+}
+
+function reviewDetailExtraValues(task, item) {
+  const config = task?.config || {};
+  const isDirectional = config.mode === "directional";
+  const isForbiddenOnly = config.mode === "forbidden_only";
+  const hasForbidden = Boolean(config.enable_forbidden_check);
+  if (isForbiddenOnly) {
+    return ["禁用词", item.matched_words || ""];
+  }
+  if (isDirectional) {
+    const checks = item.checks || {};
+    const reviewTypes = Array.isArray(config.review_types) ? config.review_types : [];
+    const issues = reviewTypes.map((reviewType) => {
+      const key = String(reviewType?.key || "");
+      const value = String(item.error_message || checks[key] || "").trim();
+      return value ? { key, value } : null;
+    }).filter(Boolean);
+    if (hasForbidden && String(item.matched_words || "").trim()) {
+      issues.push({ key: "禁用词", value: String(item.matched_words || "").trim() });
+    }
+    return [
+      issues.map((issue) => issue.key).join("\n"),
+      issues.map((issue) => `${issue.key}：${issue.value}`).join("\n"),
+    ];
+  }
+  const types = [];
+  const descriptions = [];
+  if (item.issue_type || item.error_message || item.issue) {
+    types.push(item.issue_type || "审校问题");
+    descriptions.push(item.error_message || item.issue || "");
+  }
+  if (hasForbidden && String(item.matched_words || "").trim()) {
+    types.push("禁用词");
+    descriptions.push(`禁用词：${String(item.matched_words || "").trim()}`);
+  }
+  return [types.join("\n"), descriptions.join("\n")];
+}
+
+function createReviewDiffCell(html, mode) {
+  const td = document.createElement("td");
+  td.className = "review-diff-cell";
+  const sideClass = mode === "add" ? "diff-inline-add" : "diff-inline-delete";
+  const label = mode === "add" ? "建议" : "原译文";
+  td.innerHTML = `
+    <div class="diff-inline-side ${sideClass}">
+      <div class="diff-inline-label">${label}</div>
+      <div class="diff-inline-text">${html}</div>
+    </div>`;
+  return td;
+}
+
+function renderReviewDetailRows(task, results) {
+  const head = $("reviewDetailHead");
+  const body = $("reviewDetailBody");
+  const extraHeaders = reviewDetailExtraHeaders(task);
+  const headers = ["原文", "原译文", "修改建议", ...extraHeaders];
+  head.innerHTML = "";
+  const headRow = document.createElement("tr");
+  headers.forEach((header) => {
+    const th = document.createElement("th");
+    th.textContent = header;
+    headRow.appendChild(th);
+  });
+  head.appendChild(headRow);
+
+  body.innerHTML = "";
+  const items = Array.isArray(results) ? results : [];
+  $("reviewDetailSummary").textContent = items.length ? `共 ${items.length} 条问题` : "暂无问题条目";
+  if (!items.length) {
+    body.innerHTML = `<tr><td colspan="${headers.length}" class="empty-cell">暂无问题条目</td></tr>`;
+    return;
+  }
+  items.forEach((item) => {
+    const tr = document.createElement("tr");
+    const sourceTd = document.createElement("td");
+    sourceTd.textContent = String(item.source_text || "");
+    tr.appendChild(sourceTd);
+
+    const tokens = buildDiffTokens(item.target_text || "", item.suggestion || "");
+    tr.appendChild(createReviewDiffCell(tokens.leftHtml, "delete"));
+    tr.appendChild(createReviewDiffCell(tokens.rightHtml, "add"));
+
+    reviewDetailExtraValues(task, item).forEach((value) => {
+      const td = document.createElement("td");
+      td.textContent = String(value || "");
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  });
+}
+
+async function openReviewDetailDialog() {
+  if (!aiReviewTaskId) {
+    $("reviewTaskHint").textContent = "请先开始审校任务";
+    return;
+  }
+  const data = await api(`/api/ai-review/tasks/${encodeURIComponent(aiReviewTaskId)}/issue-results`);
+  renderReviewDetailRows(data.task || aiReviewCurrentTask || {}, data.results || []);
+  $("reviewDetailOverlay").hidden = false;
+}
+
+function closeReviewDetailDialog() {
+  $("reviewDetailOverlay").hidden = true;
 }
 
 function appendAiReviewLogs(logs) {
@@ -5921,6 +6116,7 @@ async function loadAiReviewFile(filePath) {
 
 function resetAiReviewTaskView() {
   aiReviewTaskId = "";
+  aiReviewCurrentTask = null;
   aiReviewLogCursor = 0;
   if (aiReviewTaskPoller) {
     window.clearInterval(aiReviewTaskPoller);
@@ -5932,6 +6128,7 @@ function resetAiReviewTaskView() {
   $("outputPanel").classList.add("hidden");
   $("outputPath").textContent = "暂无输出";
   $("openOutputFileButton").disabled = true;
+  $("openReviewDetailButton").disabled = true;
   renderAiReviewProgress({});
   $("reviewTaskHint").textContent = "";
 }
@@ -7411,6 +7608,15 @@ $("openOutputDirButton").addEventListener("click", () => openAiReviewOutputDir()
 $("openOutputFileButton").addEventListener("click", () => openAiReviewOutputFile().catch((error) => {
   $("reviewTaskHint").textContent = error.message;
 }));
+$("openReviewDetailButton").addEventListener("click", () => openReviewDetailDialog().catch((error) => {
+  $("reviewTaskHint").textContent = error.message;
+}));
+$("closeReviewDetailButton").addEventListener("click", closeReviewDetailDialog);
+$("reviewDetailOverlay").addEventListener("click", (event) => {
+  if (event.target === $("reviewDetailOverlay")) {
+    closeReviewDetailDialog();
+  }
+});
 $("startButton").addEventListener("click", startTask);
 $("resumeButton").addEventListener("click", resumeTask);
 $("stopButton").addEventListener("click", stopTask);

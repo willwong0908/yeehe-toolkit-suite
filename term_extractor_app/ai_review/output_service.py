@@ -41,7 +41,7 @@ def generate_review_excel(task_id: str) -> Path:
         headers = ["来源文件", "sheet / segment ID", "原始行号", "原文", "译文", "禁用词检查情况"]
     elif config.get("mode") == "directional":
         review_type_keys = [item["key"] for item in config.get("review_types", [])]
-        headers = ["来源文件", "sheet / segment ID", "原始行号", "原文", "译文", *review_type_keys]
+        headers = ["来源文件", "sheet / segment ID", "原始行号", "原文", "译文", "修改建议", *review_type_keys]
     else:
         review_type_keys = []
         headers = NORMAL_HEADERS
@@ -73,6 +73,7 @@ def generate_review_excel(task_id: str) -> Path:
                 row["row_number"] or "",
                 row["source_text"] or "",
                 row["target_text"] or "",
+                row["suggestion"] or "",
                 *[row["error_message"] if row["status"] == "failed" else checks.get(key, "") for key in review_type_keys],
             ]
             if enable_forbidden:

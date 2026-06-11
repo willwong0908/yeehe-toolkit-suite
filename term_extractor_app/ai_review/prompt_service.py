@@ -21,18 +21,33 @@ DEFAULT_USER_PROMPT = (
     "3. \u5982\u679c\u6ca1\u6709\u95ee\u9898\uff0chas_issue \u4e3a false\uff0cissue_type\u3001issue\u3001suggestion \u8fd4\u56de\u7a7a\u5b57\u7b26\u4e32\u3002\n"
     "4. \u5982\u679c\u6709\u95ee\u9898\uff0cissue_type \u7528\u7b80\u6d01\u5206\u7c7b\uff0c"
     "\u4f8b\u5982\u672f\u8bed\u9519\u8bef\u3001\u6f0f\u8bd1\u3001\u9519\u8bd1\u3001\u8bed\u6cd5\u95ee\u9898\u3001\u683c\u5f0f\u95ee\u9898\u3001\u98ce\u683c\u95ee\u9898\u3002\n"
-    "5. \u5982\u679c\u6761\u76ee\u5305\u542b info \u5b57\u6bb5\uff0c\u8bf7\u628a info \u4f5c\u4e3a\u53c2\u8003\u4fe1\u606f\uff1b"
+    "5. \u5982\u679c\u6709\u95ee\u9898\uff0csuggestion \u5fc5\u987b\u53ea\u586b\u5199\u5b8c\u6574\u4fee\u6539\u540e\u7684\u8bd1\u6587\u53e5\u5b50\uff0c\u4e0d\u8981\u89e3\u91ca\uff0c\u4e0d\u8981\u5199\u4fee\u6539\u7406\u7531\uff0c\u4e0d\u8981\u53ea\u5199\u7247\u6bb5\u3002\n"
+    "6. \u5982\u679c\u6761\u76ee\u5305\u542b info \u5b57\u6bb5\uff0c\u8bf7\u628a info \u4f5c\u4e3a\u53c2\u8003\u4fe1\u606f\uff1b"
     "info \u4e2d category \u662f\u4fe1\u606f\u7c7b\u522b\uff0cvalue \u662f\u4fe1\u606f\u5185\u5bb9\u3002\n"
-    "6. \u5982\u679c\u6761\u76ee\u4e0d\u5305\u542b info \u5b57\u6bb5\uff0c\u4e0d\u8981\u5047\u8bbe\u5b58\u5728\u53c2\u8003\u4fe1\u606f\u3002\n\n"
+    "7. \u5982\u679c\u6761\u76ee\u4e0d\u5305\u542b info \u5b57\u6bb5\uff0c\u4e0d\u8981\u5047\u8bbe\u5b58\u5728\u53c2\u8003\u4fe1\u606f\u3002\n\n"
     "\u5f85\u5ba1\u6821 JSON\uff1a\n"
     "{text}"
 )
+DEFAULT_USER_PROMPT_MARKER = "\u5b8c\u6574\u4fee\u6539\u540e\u7684\u8bd1\u6587\u53e5\u5b50"
 
 
 def ensure_default_prompt_template() -> None:
     with get_connection() as conn:
         row = conn.execute("SELECT id FROM prompt_templates WHERE is_default = 1 LIMIT 1").fetchone()
         if row:
+            prompt_row = conn.execute(
+                "SELECT user_prompt FROM prompt_templates WHERE id = ?",
+                (row["id"],),
+            ).fetchone()
+            if prompt_row and DEFAULT_USER_PROMPT_MARKER not in str(prompt_row["user_prompt"] or ""):
+                conn.execute(
+                    """
+                    UPDATE prompt_templates
+                    SET name = ?, system_prompt = ?, user_prompt = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (DEFAULT_TEMPLATE_NAME, DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT, utc_now(), row["id"]),
+                )
             return
         now = utc_now()
         conn.execute(
