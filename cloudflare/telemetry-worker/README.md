@@ -41,6 +41,19 @@
 - `task_action.cross_excel_search`
 - `task_action.cross_excel_merge`
 
+## 当日使用总量规则
+
+“当日使用总量” 不再统计当天所有埋点事件之和。
+现在只统计“开始一次具体工具任务”的事件：
+
+- `task_start.text_preprocess`
+- `task_start.ai_review`
+- `task_action.cross_excel_search`
+- `task_action.cross_excel_merge`
+- `diff.compare.start`
+
+其他事件例如打开页签、成功/失败、模型档位、思考模式、跳转、导入规则等，都会继续保留为独立统计项，但不会再计入“当日使用总量”。
+
 ## 部署步骤
 
 1. 进入本目录。

@@ -15,6 +15,13 @@ const DEFAULT_FEISHU_APP_TOKEN = "IQzWbHaNSa0YS4s8TQ0cNwcjnig";
 const DEFAULT_FEEDBACK_TABLE_ID = "tbllz4fLlof3RPsf";
 const DEFAULT_STATS_TABLE_ID = "tblktD7KDOt1scMp";
 const STATE_APP_UPDATE_INFO = "app_update_info_v1";
+const DAILY_USAGE_TOTAL_EVENTS = new Set([
+  "task_start.text_preprocess",
+  "task_start.ai_review",
+  "task_action.cross_excel_search",
+  "task_action.cross_excel_merge",
+  "diff.compare.start",
+]);
 
 const CHUNK_CREATE_LIMIT = 1000;
 const CHUNK_DELETE_LIMIT = 500;
@@ -480,6 +487,9 @@ async function loadEventRows(env) {
 function buildDailyTotals(rows) {
   const merged = new Map();
   for (const row of rows) {
+    if (!DAILY_USAGE_TOTAL_EVENTS.has(String(row.event_name || "").trim())) {
+      continue;
+    }
     const date = String(row.event_date || "");
     const count = Number(row.count || 0);
     merged.set(date, (merged.get(date) || 0) + count);
@@ -558,11 +568,13 @@ async function getStatsInfo(env) {
   let statsTableId = getConfiguredStatsTableId(env);
   const appUrl = appToken ? `https://oy98p636wy.feishu.cn/base/${appToken}` : "";
   const todayDate = utcDate();
+  const placeholders = Array.from(DAILY_USAGE_TOTAL_EVENTS).map(() => "?").join(", ");
   const todayRow = await env.DB.prepare(
     `SELECT COALESCE(SUM(count), 0) AS total_count
      FROM event_counts
-     WHERE event_date = ?`
-  ).bind(todayDate).first();
+     WHERE event_date = ?
+       AND event_name IN (${placeholders})`
+  ).bind(todayDate, ...Array.from(DAILY_USAGE_TOTAL_EVENTS)).first();
   let dashboards = [];
   if (appToken) {
     const session = await createFeishuSession(env);
