@@ -6444,6 +6444,20 @@ input:disabled, select:disabled {
 
 /* Light theme: opt-in, persisted locally, and intentionally separate from the dark workspace defaults. */
 html.light-theme {
+  --text: #182235;
+  --accent: #2563eb;
+  --surface-raised: #ffffff;
+  --surface-inset: #f7f9fc;
+  --surface-hover: #edf3fc;
+  --selected-bg: #e8f0ff;
+  --selected-line: #a7c3ef;
+  --success-bg: #edf8f3;
+  --success-line: #b5ddcc;
+  --warning: #855507;
+  --warning-bg: #fff7e6;
+  --warning-line: #e9cf96;
+  --danger-bg: #fff1f2;
+  --danger-line: #ebbdc3;
   color-scheme: light;
   --bg: #f3f6fb;
   --panel: #ffffff;
@@ -6540,6 +6554,157 @@ html.light-theme .review-chat-message.user, html.light-theme .followup-message.u
 html.light-theme .review-composer { border-color: #bfd0e7; background: rgba(255,255,255,.96); box-shadow: inset 0 1px 0 #fff, 0 12px 26px rgba(51,65,85,.10); }
 html.light-theme .composer-chip, html.light-theme .review-attachment-chip, html.light-theme .review-target-tab, html.light-theme .sheet-tab { border-color: #d1dce9; background: #f8fafc; color: #52627a; }
 html.light-theme .composer-chip:hover, html.light-theme .review-target-tab:hover, html.light-theme .sheet-tab:hover { border-color: #9fc0ed; background: #edf4ff; color: #1d4ed8; }
+
+/* Component surfaces and semantic states share the light palette. */
+html.light-theme body { background: var(--bg); }
+html.light-theme :is(.hero-card, .card, .advanced-card, .tool-guide-card,
+  .cross-result-card, .update-leaving-card, .review-conversation-shell) {
+  background: var(--surface-raised); border-color: var(--line); color: var(--ink);
+  box-shadow: 0 2px 8px rgba(24,34,53,.04);
+}
+html.light-theme :is(.metrics div, .compact-metrics div, .stats-panel,
+  .result-file, .notice-list div, .scope-item, .scope-empty, .prompt-card,
+  .cross-summary-box, .cross-empty-state, .cross-header-item, .cross-cell,
+  .diff-header-presence span, .diff-compare-field-list, .diff-compare-field-item,
+  .review-followup-context, .review-followup-messages, .mapping-template-bar,
+  .mapping-row, .review-mapping-preset-panel, .review-import-mode-option,
+  .review-workspace-file-card, .review-workspace-sample, .review-request-queue,
+  .review-request-lane, .review-request-item, .preprocess-progress-overview > div,
+  .preprocess-progress-metrics > div, .preprocess-events, .stage-panel) {
+  background: var(--surface-inset); border-color: var(--line); color: var(--ink); box-shadow: none;
+}
+html.light-theme :is(.metrics strong, .compact-metrics strong, .result-file strong,
+  .prompt-card strong, .cross-summary-box strong, .cross-cell-text,
+  .diff-header-presence strong, .diff-compare-field-item span, .mapping-header,
+  .review-mapping-file-copy h2, .review-mapping-field-label label,
+  .review-import-mode-option strong, .review-workspace-preview-head strong,
+  .review-workspace-file-head strong, .review-workspace-endpoint strong,
+  .preprocess-progress-overview strong, .preprocess-progress-metrics strong,
+  .preprocess-events-head strong, .review-request-queue-head strong,
+  .review-request-lane-head strong, .review-request-item strong,
+  .update-leaving-card h2, .followup-context-section p, .diff-inline-text) { color: var(--ink); }
+html.light-theme :is(.metrics span, .stats-title, .result-file span, .result-file small,
+  .prompt-card small, .cross-summary-box span, .cross-summary-box small,
+  .cross-header-item span, .cross-cell-index, .review-mapping-file-copy > span,
+  .review-mapping-lead, .review-mapping-field-label span, .review-mapping-preset-panel > small,
+  .review-import-mode-option small, .review-workspace-preview-head span,
+  .review-workspace-file-head span, .review-workspace-mapping-head > span:last-child,
+  .review-workspace-endpoint span, .review-workspace-reference, .review-workspace-sample > span,
+  .review-workspace-empty, .review-workspace-notes, .review-workspace-note-copy p,
+  .preprocess-progress-overview span, .preprocess-progress-metrics span,
+  .preprocess-events-head span, .preprocess-event, .preprocess-events-empty,
+  .review-request-queue-head span, .review-request-lane-head span, .review-request-item span,
+  .review-request-more, .review-request-empty, .update-leaving-card p,
+  .review-language-popover-head span, .review-language-search-wrap,
+  .review-term-base-action small, .review-term-base-option small,
+  .dialog-body .field label, .dialog-body .mapping-template-hint) { color: var(--muted); }
+html.light-theme :is(.cross-result-meta, .preprocess-events-head,
+  .review-request-queue-head, .review-attachment-mapping-card > .modal-footer) {
+  background: var(--surface-inset); border-color: var(--line);
+}
+html.light-theme :is(.summary-line span, .cross-result-meta span, .prompt-badge,
+  .preprocess-status-pill, .review-request-lane-head span) {
+  background: #eef2f7; border-color: var(--line); color: var(--muted);
+}
+html.light-theme :is(.prompt-card textarea, .scope-fields textarea, .review-followup-input textarea,
+  .mapping-row select, .mapping-row input[type="text"]) {
+  background: var(--surface-raised); color: var(--ink); border-color: var(--line-strong); box-shadow: none;
+}
+html.light-theme :is(input:disabled, select:disabled, textarea:disabled,
+  .prompt-card textarea:disabled, .scope-fields textarea:disabled,
+  .mapping-row select:disabled, .mapping-row input[type="text"]:disabled) {
+  background: #edf1f6; color: #69778a; border-color: var(--line); opacity: 1;
+}
+html.light-theme :is(.log-box, pre, .review-thinking-details .review-stream-output,
+  .feedback-log-card code, .followup-message.assistant) {
+  background: var(--surface-inset); color: #40516a; border-color: var(--line);
+}
+html.light-theme .review-thinking-details summary { color: var(--muted); }
+html.light-theme :is(.review-thinking-details[open] summary, .review-mapping-file-head,
+  .review-workspace-mapping, .review-workspace-notes, .review-term-base-options,
+  .review-request-lane-head, .preprocess-event, .preprocess-progress-stage) { border-color: var(--line); }
+html.light-theme :is(.cross-header-item:hover, .cross-cell:hover, .diff-compare-field-item:hover,
+  .review-import-mode-option:hover, .review-session-rename:hover) {
+  background: var(--surface-hover); color: var(--ink); border-color: var(--selected-line); box-shadow: none;
+}
+html.light-theme :is(.review-import-mode-option.selected, .sheet-tab.active,
+  .review-language-option.selected, .review-term-base-option.selected,
+  .review-target-tab.active, .review-target-tab.active:hover, .preprocess-file-item.active) {
+  background: var(--selected-bg); color: var(--primary-strong); border-color: var(--selected-line); box-shadow: none;
+}
+html.light-theme :is(.review-language-option, .review-term-base-action, .review-term-base-option,
+  .cross-merge-actions .check) { color: var(--ink); }
+html.light-theme :is(.review-mapping-file-icon, .review-workspace-file-icon,
+  .review-import-mode-icon, .review-import-mode-option.selected .review-import-mode-icon,
+  .review-term-base-action-icon, .review-message-file, .tool-guide-card-review .tool-guide-icon) {
+  background: var(--selected-bg); color: var(--primary-strong); border-color: var(--selected-line); box-shadow: none;
+}
+html.light-theme :is(.review-workspace-arrow, .mapping-col-id,
+  .review-language-check, .review-term-base-option-check) { color: var(--primary-strong); }
+html.light-theme .review-import-mode-option > i { background: var(--primary); color: #fff; }
+html.light-theme .review-session-row.active { box-shadow: inset 2px 0 var(--primary); }
+html.light-theme .review-chat-message.workspace-report {
+  background: var(--surface-inset); border-color: var(--line); color: var(--ink); box-shadow: none;
+}
+html.light-theme .review-workspace-endpoint {
+  background: var(--success-bg); border-color: var(--success-line);
+}
+html.light-theme .review-workspace-endpoint:last-child { background: #f0f5ff; border-color: var(--selected-line); }
+html.light-theme .review-workspace-sample-source { color: #36594d; border-left-color: #6aab93; }
+html.light-theme .review-workspace-sample-target { color: #314f7b; border-left-color: #7ca3dc; }
+html.light-theme :is(.review-workspace-total, .review-workspace-language) {
+  background: var(--success-bg); border-color: var(--success-line); color: var(--success) !important;
+}
+html.light-theme .preprocess-progress-percent { background: var(--surface-inset); color: var(--primary-strong) !important; }
+html.light-theme .pattern-actions button { background: var(--surface-raised); color: var(--primary-strong); border-color: var(--line-strong); }
+html.light-theme .pattern-actions button:hover { background: var(--selected-bg); color: var(--primary-strong); border-color: var(--selected-line); }
+html.light-theme .preprocess-progress-card .progress > span { background: #3976d3; box-shadow: none; }
+html.light-theme :is(.pill, .sidebar-local-badge, .preprocess-status-pill.is-completed,
+  .review-attachment-chip, .review-import-mode-option strong em) {
+  background: var(--success-bg); border-color: var(--success-line); color: var(--success);
+}
+html.light-theme :is(.pill.running, .preprocess-status-pill.is-paused,
+  .prompt-badge.modified, .notice-button, .cross-cell.matched) {
+  background: var(--warning-bg); border-color: var(--warning-line); color: var(--warning);
+}
+html.light-theme :is(.preprocess-status-pill.is-running, .update-notice-button) {
+  background: var(--selected-bg); border-color: var(--selected-line); color: var(--primary-strong);
+}
+html.light-theme :is(.pill.failed, .preprocess-status-pill.is-failed,
+  .error-panel, button.danger, .scope-delete) {
+  background: var(--danger-bg); border-color: var(--danger-line); color: var(--danger);
+}
+html.light-theme :is(.inline-task-hint.is-error, .diff-token-delete) { color: var(--danger); }
+html.light-theme .diff-inline-delete { background: var(--danger-bg); border-color: var(--danger-line); }
+html.light-theme .diff-inline-delete .diff-inline-label { color: var(--danger); }
+html.light-theme .diff-inline-add { background: var(--success-bg); border-color: var(--success-line); }
+html.light-theme :is(.diff-inline-add .diff-inline-label, .diff-token-add) { color: var(--success); }
+html.light-theme .review-request-item em { color: var(--warning); }
+html.light-theme .preprocess-progress-overview { background: var(--line); border-color: var(--line); }
+html.light-theme :is(.progress, .progress-track, .progress-bar-wrap, .preprocess-progress-track) { background: #e2e9f3; }
+html.light-theme :is(.progress span, .progress-fill, .progress-bar, .preprocess-progress-fill) { background: #3976d3; box-shadow: none; }
+html.light-theme .preprocess-event.is-latest { color: var(--ink); background: #edf3fc; }
+html.light-theme .preprocess-event.is-latest .preprocess-event-marker { background: var(--primary); box-shadow: none; }
+html.light-theme .review-composer.dragging { border-color: var(--primary); background: #f0f5ff; }
+html.light-theme .review-composer textarea { background: transparent; color: var(--ink); box-shadow: none; }
+html.light-theme .feedback-dropzone:hover, html.light-theme .feedback-dropzone:focus-visible { background: #eaf2ff; border-color: var(--selected-line); }
+html.light-theme .tool-guide-dialog .dialog-card {
+  background: var(--surface-raised); border-color: var(--line); color: var(--ink);
+  box-shadow: 0 20px 60px rgba(24,34,53,.16);
+}
+html.light-theme .tool-guide-dialog :is(.dialog-header, .markdown-guide section) { border-color: var(--line); }
+html.light-theme .tool-guide-dialog :is(.markdown-guide, .markdown-guide h4) { color: var(--ink); }
+html.light-theme .tool-guide-dialog :is(.markdown-guide p, .markdown-guide ul, .markdown-guide ol) { color: var(--muted); }
+html.light-theme .tool-guide-dialog :is(.dialog-kicker, .markdown-guide code) { color: var(--primary-strong); }
+html.light-theme .tool-guide-dialog .markdown-guide code { background: var(--selected-bg); }
+html.light-theme :is(.tool-guide-close, .advanced-card summary::after) {
+  background: var(--surface-inset); color: var(--muted); border-color: var(--line);
+}
+html.light-theme .tool-guide-close:hover { background: var(--selected-bg); color: var(--primary-strong); border-color: var(--selected-line); }
+html.light-theme button.primary { background: #2563eb; border-color: #2563eb; box-shadow: 0 2px 4px rgba(37,99,235,.12); }
+html.light-theme button.primary:hover:not(:disabled) { background: #1d4ed8; border-color: #1d4ed8; box-shadow: 0 2px 6px rgba(37,99,235,.16); }
+html.light-theme button.primary::before { background: none; }
+html.light-theme input::placeholder, html.light-theme textarea::placeholder { color: #69798f; }
 @media (max-width: 700px) {
   .preprocess-progress-overview { grid-template-columns: 1fr auto; }
   .preprocess-progress-stage { grid-column: 1 / -1; border-top: 1px solid rgba(104, 133, 181, .26); }
