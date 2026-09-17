@@ -4361,6 +4361,13 @@ button:disabled { opacity: .58; cursor: not-allowed; }
 .review-memory-rule { display: grid; grid-template-columns: 72px 80px minmax(0, 1fr); align-items: start; gap: 10px; padding: 11px; border: 1px solid var(--line); border-radius: 8px; background: rgba(7, 15, 30, .22); }
 .review-memory-rule-index, .review-memory-rule-weight { padding-top: 9px; color: var(--muted); font-size: 12px; }
 .review-memory-rule textarea { width: 100%; min-height: 72px; resize: vertical; line-height: 1.55; }
+.review-memory-example { grid-column: 1 / -1; padding-top: 10px; border-top: 1px solid var(--line); color: var(--text); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.review-memory-example-title { color: var(--muted); font-size: 12px; }
+.review-memory-example label { display: grid; gap: 4px; margin-top: 9px; color: var(--muted); font-size: 12px; }
+.review-memory-example textarea { width: 100%; min-height: 52px; resize: vertical; line-height: 1.55; }
+html.light-theme .review-memory-rule { background: #f5f8fc; }
+html.light-theme #reviewMemoryOverlay button { color: #334155; background: #f1f5f9; border-color: #cbd5e1; }
+html.light-theme #reviewMemoryOverlay #saveReviewMemoryButton { color: #1d4ed8; background: #eaf2ff; border-color: #bfd4fb; }
 .review-memory-footer { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
 @media (max-width: 680px) {
   .review-memory-rule { grid-template-columns: 1fr 1fr; }
@@ -9066,6 +9073,26 @@ function renderReviewMemoryRules() {
       editor.dataset.ruleId = String(rule.id || '');
       editor.setAttribute('aria-label', `${sectionInfo.title} ${index + 1}`);
       row.append(number, weight, editor);
+      const example = document.createElement('div');
+      example.className = 'review-memory-example';
+      const label = document.createElement('div');
+      label.className = 'review-memory-example-title';
+      label.textContent = rule.few_shot
+        ? 'Few shot · 不计入规范字数 · 可手动改写；清空原文与译文可删除案例'
+        : 'Few shot · 不计入规范字数 · 可填写一组双语案例';
+      example.appendChild(label);
+      for (const [key, title] of [['source_text', '原文'], ['target_text', '译文']]) {
+        const field = document.createElement('label');
+        field.textContent = title;
+        const input = document.createElement('textarea');
+        input.value = String(rule.few_shot?.[key] || '');
+        input.dataset.ruleId = String(rule.id || '');
+        input.dataset.fewShotKey = key;
+        input.setAttribute('aria-label', `${sectionInfo.title} ${index + 1}案例${title}`);
+        field.appendChild(input);
+        example.appendChild(field);
+      }
+      row.appendChild(example);
       section.appendChild(row);
     });
     list.appendChild(section);
@@ -9100,7 +9127,15 @@ function closeReviewMemoryDialog() {
 async function saveReviewMemory() {
   if (reviewMemoryState.saving || !reviewMemoryState.sessionId) return;
   const rules = [...$('reviewMemoryRuleList').querySelectorAll('textarea[data-rule-id]')]
-    .map(editor => ({id:editor.dataset.ruleId, text:editor.value.trim()}));
+    .filter(editor => !editor.dataset.fewShotKey)
+    .map(editor => {
+      const id = editor.dataset.ruleId;
+      const source = $('reviewMemoryRuleList').querySelector(`textarea[data-rule-id="${id}"][data-few-shot-key="source_text"]`);
+      const target = $('reviewMemoryRuleList').querySelector(`textarea[data-rule-id="${id}"][data-few-shot-key="target_text"]`);
+      return {id, text:editor.value.trim(), few_shot: source || target ? {
+        source_text: source?.value.trim() || '', target_text: target?.value.trim() || ''
+      } : null};
+    });
   if (rules.some(rule => !rule.text)) { $('reviewMemoryHint').textContent = '规范内容不能为空。'; return; }
   reviewMemoryState.saving = true;
   $('saveReviewMemoryButton').disabled = true;

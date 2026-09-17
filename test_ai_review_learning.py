@@ -89,6 +89,121 @@ class ReviewLearningTests(unittest.TestCase):
         text=learning.memory_prompt({'rules':[{'text':'active norm','active':True},{'text':'candidate norm','active':False}]})
         self.assertIn('active norm',text); self.assertNotIn('candidate norm',text)
 
+    def test_few_shot_soft_length_limit_provenance_and_no_truncation(self):
+        feedback = [{'source_text':'s' * 101, 'target_text':'译' * 101},
+                    {'source_text':'other', 'target_text':'different'}]
+        def apply(example):
+            return learning.apply_memory_update([], {'triggered_ids':[], 'new_rules':[
+                {'text':'norm', 'few_shot':example}]}, feedback)
+        valid = {'feedback_index':0, 'source_text':'s' * 100, 'target_text':'译' * 100}
+        self.assertEqual(len(apply(valid)[0]['few_shot']['target_text']), 100)
+        long_example = {'feedback_index':0, 'source_text':'s' * 101, 'target_text':'译' * 101}
+        saved = apply(long_example)[0]['few_shot']
+        self.assertEqual(saved, {key:long_example[key] for key in ('source_text', 'target_text')})
+        for change in ({'source_text':''}, {'target_text':'invented'},
+                       {'target_text':'different'}, {'feedback_index':2}, {'feedback_index':False}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                apply({**valid, **change})
+
+    def test_few_shot_retained_or_replaced_once_without_mutating_old(self):
+        previous = {'source_text':'old source', 'target_text':'old target'}
+        old = [{'id':'a', 'text':'norm', 'weight':1., 'active':True, 'few_shot':previous}]
+        feedback = [{'source_text':'new source', 'target_text':'new target'}]
+        response = {'triggered_ids':['a'], 'new_rules':[]}
+        self.assertEqual(learning.apply_memory_update(old, response, feedback)[0]['few_shot'], previous)
+        update = {'id':'a', 'few_shot':{'feedback_index':0, **feedback[0]}}
+        result = learning.apply_memory_update(old, {**response, 'few_shot_updates':[update]}, feedback)
+        self.assertEqual(result[0]['few_shot'], feedback[0])
+        self.assertEqual(old[0]['few_shot'], previous)
+        for changes in ({'few_shot_updates':[update, update]},
+                        {'triggered_ids':[], 'few_shot_updates':[update]}):
+            with self.assertRaises(ValueError):
+                learning.apply_memory_update(old, {**response, **changes}, feedback)
+
+    def test_few_shot_excluded_from_quota_and_candidates_not_injected(self):
+        example = {'source_text':'s' * 100, 'target_text':'t' * 100}
+        old = [{'id':str(i), 'text':str(i) + 'n' * 499, 'weight':1., 'active':i < 6,
+                'few_shot':example if i < 6 else {'source_text':'candidate example', 'target_text':'hidden'}}
+               for i in range(7)]
+        rules = learning.apply_memory_update(old, {'triggered_ids':['0'], 'new_rules':[]})
+        self.assertEqual(sum(r['active'] for r in rules), 6)
+        prompt = learning.memory_prompt({'rules':rules})
+        self.assertEqual(prompt.count('Few shot'), 6)
+        self.assertIn('s' * 100, prompt)
+        self.assertNotIn('candidate example', prompt)
+
+    def test_few_shot_worker_persistence_manual_edit_and_session_delete(self):
+        self.feedback()
+        reply = db.dumps_json({'triggered_ids':[], 'new_rules':[{'text':'norm', 'few_shot':{
+            'feedback_index':0, 'source_text':'source0', 'target_text':'target0'}}]})
+        with patch('term_extractor_app.ai_review.shared_provider.followup_chat', return_value=reply):
+            learning._learning_worker(self.session)
+        url = f'/api/ai-review/conversations/{self.session}/memory'
+        memory = self.client.get(url).json()
+        self.assertEqual(memory['rules'][0]['few_shot'], {'source_text':'source0', 'target_text':'target0'})
+        self.assertEqual(learning.memory_snapshot(self.other)['rules'], [])
+        edits = [{'id':memory['rules'][0]['id'], 'text':'norm', 'few_shot':memory['rules'][0]['few_shot']}]
+        unchanged = self.client.put(url, json={'version':1, 'rules':edits}).json()
+        self.assertIn('few_shot', unchanged['rules'][0])
+        edits[0].update({'text':'rewritten norm', 'few_shot':{'source_text':'manual source', 'target_text':'manual target'}})
+        changed = self.client.put(url, json={'version':1, 'rules':edits}).json()
+        self.assertEqual(changed['rules'][0]['few_shot'], {'source_text':'manual source', 'target_text':'manual target'})
+        self.assertEqual(changed['version'], 2)
+        edits[0]['few_shot'] = {'source_text':'', 'target_text':''}
+        deleted = self.client.put(url, json={'version':2, 'rules':edits}).json()
+        self.assertNotIn('few_shot', deleted['rules'][0])
+        self.assertEqual(deleted['version'], 3)
+        delete_session(self.session)
+        self.assertEqual(learning.memory_snapshot(self.session)['rules'], [])
+
+    def test_manual_few_shot_requires_bilingual_pair(self):
+        rules = [{'id':'a', 'text':'norm', 'weight':1., 'active':True,
+                  'few_shot':{'source_text':'old', 'target_text':'旧'}}]
+        with db.get_connection() as conn:
+            conn.execute('INSERT INTO review_memory VALUES (?, ?, ?, ?)',
+                         (self.session, 1, db.dumps_json(rules), 'now'))
+        url = f'/api/ai-review/conversations/{self.session}/memory'
+        for value in ({'source_text':'only source', 'target_text':''}, {'source_text':'', 'target_text':'仅译文'}):
+            response = self.client.put(url, json={'version':1, 'rules':[{'id':'a', 'text':'norm', 'few_shot':value}]})
+            self.assertEqual(response.status_code, 400)
+        unchanged = self.client.put(url, json={'version':1, 'rules':[{'id':'a', 'text':'norm', 'few_shot':rules[0]['few_shot']}]}).json()
+        self.assertEqual(unchanged['version'], 1)
+
+    def test_manual_few_shot_can_be_added_to_an_old_rule(self):
+        rules = [{'id':'a', 'text':'norm', 'weight':1., 'active':True}]
+        with db.get_connection() as conn:
+            conn.execute('INSERT INTO review_memory VALUES (?, ?, ?, ?)',
+                         (self.session, 1, db.dumps_json(rules), 'now'))
+        url = f'/api/ai-review/conversations/{self.session}/memory'
+        response = self.client.put(url, json={'version':1, 'rules':[{'id':'a', 'text':'norm',
+            'few_shot':{'source_text':'manual source', 'target_text':'manual target'}}]})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['rules'][0]['few_shot'],
+                         {'source_text':'manual source', 'target_text':'manual target'})
+
+    def test_invalid_case_keeps_memory_and_feedback_for_retry(self):
+        self.feedback()
+        reply = db.dumps_json({'triggered_ids':[], 'new_rules':[{'text':'norm', 'few_shot':{
+            'feedback_index':0, 'source_text':'invented', 'target_text':'target0'}}]})
+        with patch('term_extractor_app.ai_review.shared_provider.followup_chat', return_value=reply):
+            learning._learning_worker(self.session)
+        self.assertEqual(learning.memory_snapshot(self.session)['version'], 0)
+        self.assertEqual(learning.learning_status(self.session)['events'][0]['status'], 'failed')
+        self.assertFalse(review.get_review_results('t')[0]['has_issue'])
+
+    def test_concurrent_manual_edit_not_overwritten_by_learning(self):
+        with db.get_connection() as conn:
+            conn.execute('INSERT INTO review_memory VALUES (?, ?, ?, ?)', (self.session, 1,
+                         db.dumps_json([{'id':'a', 'text':'old', 'weight':1., 'active':True}]), 'now'))
+        self.feedback()
+        def respond(**kwargs):
+            learning.update_memory(self.session, 1, [{'id':'a', 'text':'manual edit'}])
+            return db.dumps_json({'triggered_ids':['a'], 'new_rules':[]})
+        with patch('term_extractor_app.ai_review.shared_provider.followup_chat', side_effect=respond):
+            learning._learning_worker(self.session)
+        self.assertEqual(learning.memory_snapshot(self.session)['rules'][0]['text'], 'manual edit')
+        self.assertEqual(learning.learning_status(self.session)['events'][0]['status'], 'failed')
+
     def test_memory_editor_api_preserves_weights_and_rejects_stale_save(self):
         rules = [
             {'id':'active','text':'使用中的规范','weight':2.5,'active':True},

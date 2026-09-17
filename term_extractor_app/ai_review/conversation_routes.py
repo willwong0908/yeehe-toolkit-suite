@@ -68,6 +68,7 @@ class LearningOptions(BaseModel):
 class MemoryRuleEdit(BaseModel):
     id: str
     text: str
+    few_shot: dict[str, str] | None = None
 
 
 class MemoryUpdatePayload(BaseModel):
@@ -123,7 +124,7 @@ def get_memory(session_id: str):
 def update_memory(session_id: str, payload: MemoryUpdatePayload):
     try:
         return learning_service.update_memory(
-            session_id, payload.version, [rule.model_dump() for rule in payload.rules])
+            session_id, payload.version, [rule.model_dump(exclude_unset=True) for rule in payload.rules])
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
