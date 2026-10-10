@@ -84,9 +84,9 @@
       "enabled": true,
       "order_index": 5,
       "examples": [
-        "{HealTool.HealAmount}",
-        "{requiredDifficulty}",
-        "{attributeType}"
+        "{potionConsultClosing}",
+        "{tarotTopic}",
+        "{tarotClosing}"
       ],
       "source": "builtin",
       "conflict_notes": ""
@@ -102,8 +102,9 @@
       "enabled": true,
       "order_index": 6,
       "examples": [
-        "[sprite=icon_coin]",
-        "[BTN_A]"
+        "[sh]",
+        "[fs:7]",
+        "[fs:5]"
       ],
       "source": "builtin",
       "conflict_notes": ""
