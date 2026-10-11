@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +42,12 @@ def start_session_review(session_id: str, run_id: str | None = None) -> list[dic
             raise ValueError("当前会话已有审校任务在运行")
 
     template = get_prompt_template(session.get("prompt_template_id"))
+    monitor_group_id = uuid.uuid4().hex
+    monitor_expected_languages: dict[str, list[str]] = {}
+    for target in targets:
+        language = str(target.get("language") or "auto")
+        for source_file in {str(unit.get("source_file") or "直接输入") for unit in target["units"]}:
+            monitor_expected_languages.setdefault(source_file, []).append(language)
     created: list[dict[str, str]] = []
     for target in targets:
         language = str(target.get("language") or "auto")
@@ -94,6 +101,8 @@ def start_session_review(session_id: str, run_id: str | None = None) -> list[dic
             session_id=session_id,
             term_base_id=session.get("term_base_id"),
             memoq_term_base_ids=session.get("memoq_term_base_ids") or [],
+            monitor_group_id=monitor_group_id,
+            monitor_expected_languages=monitor_expected_languages,
         )
         link_task(session_id, language, task_id)
         created.append({"target_language": language, "task_id": task_id})

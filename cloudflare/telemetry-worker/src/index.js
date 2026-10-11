@@ -14,6 +14,39 @@ const STATS_FIELD_COUNT = "\u6b21\u6570";
 const DEFAULT_FEISHU_APP_TOKEN = "IQzWbHaNSa0YS4s8TQ0cNwcjnig";
 const DEFAULT_FEEDBACK_TABLE_ID = "tbllz4fLlof3RPsf";
 const DEFAULT_STATS_TABLE_ID = "tblktD7KDOt1scMp";
+const REVIEW_MONITOR_TABLE_NAME = "AI 审校记录";
+const DEFAULT_PM_MAPPING_TABLE_ID = "tblRn2AV5qiHkEwS";
+const REVIEW_FIELD_RECORD_ID = "记录ID";
+const REVIEW_FIELD_TASK_ID = "任务关联ID";
+const REVIEW_FIELD_FILENAME = "文件名";
+const REVIEW_FIELD_PM = "PM";
+const REVIEW_FIELD_STARTED = "执行时间";
+const REVIEW_FIELD_FINISHED = "完成时间";
+const REVIEW_FIELD_DURATION = "耗时";
+const REVIEW_FIELD_STATUS = "状态";
+const REVIEW_FIELD_LANGUAGE = "目标语言";
+const REVIEW_FIELD_TOTAL = "条目数";
+const REVIEW_FIELD_REQUESTED = "AI请求条数";
+const REVIEW_FIELD_CACHED = "缓存命中数";
+const REVIEW_FIELD_FAILED = "失败条目数";
+const REVIEW_FIELD_MODEL = "模型";
+const REVIEW_FIELD_VERSION = "应用版本";
+const REVIEW_FIELD_ERROR = "错误类别";
+const REVIEW_FIELD_ACTIVITY = "最后活动时间";
+const REVIEW_MONITOR_FIELDS = [
+  [REVIEW_FIELD_TASK_ID, 1], [REVIEW_FIELD_FILENAME, 1], [REVIEW_FIELD_PM, 1],
+  [REVIEW_FIELD_STARTED, 5], [REVIEW_FIELD_FINISHED, 5], [REVIEW_FIELD_DURATION, 2],
+  [REVIEW_FIELD_STATUS, 1], [REVIEW_FIELD_LANGUAGE, 1], [REVIEW_FIELD_TOTAL, 2],
+  [REVIEW_FIELD_REQUESTED, 2], [REVIEW_FIELD_CACHED, 2], [REVIEW_FIELD_FAILED, 2],
+  [REVIEW_FIELD_MODEL, 1], [REVIEW_FIELD_VERSION, 1], [REVIEW_FIELD_ERROR, 1],
+  [REVIEW_FIELD_ACTIVITY, 5],
+];
+const PM_FIELD_ALIASES = ["PM", "pm", "PM姓名", "负责人", "负责人姓名", "姓名"];
+const KEY_FIELD_ALIASES = ["API Key", "API key", "api_key", "Key", "key", "密钥", "DeepSeek API Key"];
+let pmMappingCache = { loadedAt: 0, map: new Map(), conflicts: new Set(), error: "" };
+let pmMappingRefreshAt = 0;
+const PM_MAPPING_CACHE_MS = 5 * 60 * 1000;
+const PM_MAPPING_REFRESH_COOLDOWN_MS = 60 * 1000;
 const STATE_APP_UPDATE_INFO = "app_update_info_v1";
 const DAILY_USAGE_TOTAL_EVENTS = new Set([
   "task_start.text_preprocess",
@@ -63,6 +96,7 @@ function normalizeEvents(body) {
   const normalized = [];
   for (const item of events) {
     const name = String(item?.name || "").trim();
+    if (name === "review_monitor") continue;
     const count = Math.max(1, Math.min(100, Number(item?.count || 1) || 1));
     const ts = Number(item?.ts || Math.floor(Date.now() / 1000));
     if (!EVENT_NAME_RE.test(name)) {
@@ -161,6 +195,159 @@ function getConfiguredStatsTableId(env) {
   return String(env.FEISHU_STATS_TABLE_ID || DEFAULT_STATS_TABLE_ID).trim();
 }
 
+function getConfiguredPmMappingTableId(env) {
+  return String(env.FEISHU_PM_MAPPING_TABLE_ID || DEFAULT_PM_MAPPING_TABLE_ID).trim();
+}
+
+function getConfiguredReviewMonitorTableId(env) {
+  return String(env.FEISHU_REVIEW_MONITOR_TABLE_ID || "").trim();
+}
+
+function normalizeReviewRecords(body) {
+  const records = Array.isArray(body?.review_records)
+    ? body.review_records
+    : (Array.isArray(body?.events) ? body.events.filter((item) => String(item?.name || "") === "review_monitor").map((item) => item.payload) : []);
+  const version = String(body?.app_version || "").trim().slice(0, 80) || "unknown";
+  const normalized = [];
+  for (const item of records) {
+    if (!item || typeof item !== "object") continue;
+    const recordId = String(item.record_id || "").trim().slice(0, 128);
+    if (!recordId) continue;
+    normalized.push({
+      record_id: recordId,
+      task_id: String(item.task_id || recordId).trim().slice(0, 128),
+      group_id: String(item.group_id || recordId).trim().slice(0, 160),
+      revision: Math.max(1, Math.min(1000000000, Number(item.revision || 1) || 1)),
+      expected_languages: Array.isArray(item.expected_languages)
+        ? item.expected_languages.map((value) => String(value || "").trim().slice(0, 80)).filter(Boolean).slice(0, 20)
+        : [],
+      filename: String(item.filename || "未命名文件").trim().slice(0, 500),
+      pm_fingerprint: String(item.pm_fingerprint || "").trim().toLowerCase().slice(0, 128),
+      status: String(item.status || "运行中").trim().slice(0, 40),
+      started_at: String(item.started_at || "").trim().slice(0, 40),
+      finished_at: item.finished_at ? String(item.finished_at).trim().slice(0, 40) : null,
+      last_activity_at: String(item.last_activity_at || item.started_at || utcNow()).trim().slice(0, 40),
+      target_language: String(item.target_language || "").trim().slice(0, 80),
+      total_count: Math.max(0, Math.min(100000000, Number(item.total_count || 0) || 0)),
+      requested_count: Math.max(0, Math.min(100000000, Number(item.requested_count || 0) || 0)),
+      cached_count: Math.max(0, Math.min(100000000, Number(item.cached_count || 0) || 0)),
+      failed_count: Math.max(0, Math.min(100000000, Number(item.failed_count || 0) || 0)),
+      model: String(item.model || "").trim().slice(0, 120),
+      app_version: String(item.app_version || version).trim().slice(0, 80) || "unknown",
+      error_category: String(item.error_category || "").trim().slice(0, 200),
+      updated_at: utcNow(),
+    });
+  }
+  return normalized;
+}
+
+async function sha256Hex(value) {
+  const bytes = new TextEncoder().encode(String(value || ""));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map((item) => item.toString(16).padStart(2, "0")).join("");
+}
+
+function fieldValue(fields, aliases) {
+  for (const alias of aliases) {
+    const value = fields?.[alias];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (Array.isArray(value) && value.length) {
+      const text = value.map((item) => typeof item === "string" ? item : item?.text || item?.name || "").join("").trim();
+      if (text) return text;
+    }
+    if (value && typeof value === "object") {
+      const text = String(value.text || value.name || value.value || "").trim();
+      if (text) return text;
+    }
+  }
+  return "";
+}
+
+async function loadPmMapping(env, session, force = false) {
+  const now = Date.now();
+  if (!force && pmMappingCache.loadedAt && now - pmMappingCache.loadedAt < PM_MAPPING_CACHE_MS) return pmMappingCache;
+  if (now - pmMappingRefreshAt < PM_MAPPING_REFRESH_COOLDOWN_MS && pmMappingCache.loadedAt) return pmMappingCache;
+  pmMappingRefreshAt = now;
+  try {
+    const records = await listRecords(session, getConfiguredAppToken(env), getConfiguredPmMappingTableId(env));
+    const map = new Map();
+    const conflicts = new Set();
+    for (const record of records) {
+      const fields = record?.fields || {};
+      const key = fieldValue(fields, KEY_FIELD_ALIASES);
+      const pm = fieldValue(fields, PM_FIELD_ALIASES);
+      if (!key || !pm) continue;
+      const fingerprint = await sha256Hex(key);
+      const existing = map.get(fingerprint);
+      if (existing && existing !== pm) {
+        conflicts.add(fingerprint);
+      } else if (!conflicts.has(fingerprint)) {
+        map.set(fingerprint, pm);
+      }
+    }
+    pmMappingCache = { loadedAt: now, map, conflicts, error: "" };
+  } catch {
+    pmMappingCache = { ...pmMappingCache, error: "mapping_unavailable" };
+  }
+  return pmMappingCache;
+}
+
+async function resolvePm(env, session, fingerprint) {
+  const normalized = String(fingerprint || "").trim().toLowerCase();
+  if (!normalized) return "未识别";
+  let cache = await loadPmMapping(env, session, false);
+  if (!cache.map.has(normalized) && !cache.conflicts.has(normalized)) {
+    cache = await loadPmMapping(env, session, true);
+  }
+  if (cache.conflicts.has(normalized)) return "映射冲突";
+  return cache.map.get(normalized) || "未识别";
+}
+
+async function upsertReviewMonitorRecords(env, records) {
+  if (!records.length) return 0;
+  let session = null;
+  try {
+    session = await createFeishuSession(env);
+  } catch {
+    session = null;
+  }
+  const resolved = [];
+  for (const record of records) {
+    let pm = "未识别";
+    if (session) {
+      try {
+        pm = await resolvePm(env, session, record.pm_fingerprint);
+      } catch {
+        pm = pmMappingCache.map.get(record.pm_fingerprint) || "未识别";
+      }
+    }
+    resolved.push({ ...record, pm });
+  }
+  const statements = resolved.map((record) => env.DB.prepare(
+    `INSERT INTO review_monitor_records
+      (record_id, task_id, group_id, revision, filename, pm_fingerprint, pm, status, started_at, finished_at,
+       last_activity_at, target_language, total_count, requested_count, cached_count, failed_count,
+       model, app_version, error_category, expected_languages_json, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(record_id) DO UPDATE SET
+       task_id=excluded.task_id, group_id=excluded.group_id, revision=excluded.revision, filename=excluded.filename,
+       pm_fingerprint=excluded.pm_fingerprint, pm=excluded.pm, status=excluded.status,
+       started_at=excluded.started_at, finished_at=excluded.finished_at,
+       last_activity_at=excluded.last_activity_at, target_language=excluded.target_language,
+       total_count=excluded.total_count, requested_count=excluded.requested_count,
+       cached_count=excluded.cached_count, failed_count=excluded.failed_count,
+       model=excluded.model, app_version=excluded.app_version,
+       error_category=excluded.error_category, expected_languages_json=excluded.expected_languages_json,
+       updated_at=excluded.updated_at
+       WHERE excluded.revision >= review_monitor_records.revision`
+  ).bind(record.record_id, record.task_id, record.group_id, record.revision, record.filename, record.pm_fingerprint, record.pm,
+    record.status, record.started_at, record.finished_at, record.last_activity_at, record.target_language,
+    record.total_count, record.requested_count, record.cached_count, record.failed_count, record.model,
+    record.app_version, record.error_category, JSON.stringify(record.expected_languages || []), record.updated_at));
+  await env.DB.batch(statements);
+  return resolved;
+}
+
 async function feishuJson(session, path, options = {}) {
   const response = await fetch(`https://open.feishu.cn${path}`, {
     ...options,
@@ -221,6 +408,15 @@ async function listTables(session, appToken) {
   return Array.isArray(data.items) ? data.items : [];
 }
 
+async function createBitableTable(session, appToken, name) {
+  const data = await feishuJson(session, `/open-apis/bitable/v1/apps/${appToken}/tables`, {
+    method: "POST",
+    headers: { "content-type": "application/json; charset=utf-8" },
+    body: JSON.stringify({ table: { name, default_view_name: "表格视图" } }),
+  });
+  return String(data.table_id || data.table?.table_id || "");
+}
+
 async function listRecords(session, appToken, tableId) {
   const records = [];
   let pageToken = "";
@@ -278,6 +474,20 @@ async function batchCreateRecords(session, appToken, tableId, records) {
     created += batch.length;
   }
   return created;
+}
+
+async function batchUpdateRecords(session, appToken, tableId, records) {
+  if (!records.length) return 0;
+  let updated = 0;
+  for (const batch of chunkArray(records, CHUNK_CREATE_LIMIT)) {
+    await feishuJson(session, `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/records/batch_update`, {
+      method: "POST",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ records: batch.map((item) => ({ record_id: item.record_id, fields: item.fields })) }),
+    });
+    updated += batch.length;
+  }
+  return updated;
 }
 
 async function ensurePrimaryTextField(session, appToken, tableId, targetName) {
@@ -381,6 +591,178 @@ async function ensureTelemetryStatsTable(session) {
   await cleanupLegacySelectField(session, appToken, tableId);
 
   return { appToken, appUrl, tableId };
+}
+
+async function ensureReviewMonitorTable(session) {
+  const env = session.env;
+  const appToken = getConfiguredAppToken(env);
+  const appUrl = `https://oy98p636wy.feishu.cn/base/${appToken}`;
+  let tableId = getConfiguredReviewMonitorTableId(env);
+  const tables = await listTables(session, appToken);
+  let matched = tableId ? tables.find((item) => String(item.table_id || "") === tableId) : null;
+  if (!matched) {
+    matched = tables.find((item) => String(item.name || "") === REVIEW_MONITOR_TABLE_NAME);
+    tableId = matched ? String(matched.table_id || "") : "";
+  }
+  if (!tableId) {
+    tableId = await createBitableTable(session, appToken, REVIEW_MONITOR_TABLE_NAME);
+    if (!tableId) throw new Error("Failed to create review monitor table.");
+  }
+  await ensurePrimaryTextField(session, appToken, tableId, REVIEW_FIELD_RECORD_ID);
+  for (const [fieldName, type] of REVIEW_MONITOR_FIELDS) {
+    await ensureNamedField(session, appToken, tableId, fieldName, type);
+  }
+  return { appToken, appUrl, tableId };
+}
+
+function isoToMillis(value) {
+  const timestamp = Date.parse(String(value || ""));
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function monitorDurationSeconds(row) {
+  if (!row?.started_at || !row?.finished_at) return null;
+  const start = Date.parse(String(row.started_at));
+  const finish = Date.parse(String(row.finished_at));
+  return Number.isFinite(start) && Number.isFinite(finish) ? Math.max(0, Math.round((finish - start) / 1000)) : null;
+}
+
+function buildReviewMonitorFields(row) {
+  const fields = {
+    [REVIEW_FIELD_TASK_ID]: String(row.task_id || ""),
+    [REVIEW_FIELD_FILENAME]: String(row.filename || "未命名文件"),
+    [REVIEW_FIELD_PM]: String(row.pm || "未识别"),
+    [REVIEW_FIELD_STARTED]: isoToMillis(row.started_at),
+    [REVIEW_FIELD_FINISHED]: isoToMillis(row.finished_at),
+    [REVIEW_FIELD_DURATION]: monitorDurationSeconds(row),
+    [REVIEW_FIELD_STATUS]: String(row.status || "运行中"),
+    [REVIEW_FIELD_LANGUAGE]: String(row.target_language || ""),
+    [REVIEW_FIELD_TOTAL]: Number(row.total_count || 0),
+    [REVIEW_FIELD_REQUESTED]: Number(row.requested_count || 0),
+    [REVIEW_FIELD_CACHED]: Number(row.cached_count || 0),
+    [REVIEW_FIELD_FAILED]: Number(row.failed_count || 0),
+    [REVIEW_FIELD_MODEL]: String(row.model || ""),
+    [REVIEW_FIELD_VERSION]: String(row.app_version || ""),
+    [REVIEW_FIELD_ERROR]: String(row.error_category || ""),
+    [REVIEW_FIELD_ACTIVITY]: isoToMillis(row.last_activity_at),
+  };
+  for (const key of Object.keys(fields)) {
+    if (fields[key] === null || fields[key] === undefined) delete fields[key];
+  }
+  fields[REVIEW_FIELD_RECORD_ID] = String(row.record_id || "");
+  return fields;
+}
+
+async function loadReviewMonitorRows(env) {
+  const result = await env.DB.prepare(
+    `SELECT record_id, task_id, group_id, revision, filename, pm, pm_fingerprint, status, started_at, finished_at,
+            last_activity_at, target_language, total_count, requested_count, cached_count,
+            failed_count, model, app_version, error_category, expected_languages_json
+     FROM review_monitor_records ORDER BY updated_at ASC`
+  ).all();
+  return Array.isArray(result.results) ? result.results : [];
+}
+
+function mergeReviewMonitorRows(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const groupId = String(row.group_id || row.record_id || "");
+    if (!groups.has(groupId)) {
+      groups.set(groupId, { ...row, record_id: groupId, task_id: groupId, _statuses: [String(row.status || "")],
+        _languages: new Set([String(row.target_language || ""), ...JSON.parse(row.expected_languages_json || "[]")].filter(Boolean)),
+        _task_ids: new Set([String(row.task_id || "")].filter(Boolean)) });
+      continue;
+    }
+    const current = groups.get(groupId);
+    current.total_count += Number(row.total_count || 0);
+    current.requested_count += Number(row.requested_count || 0);
+    current.cached_count += Number(row.cached_count || 0);
+    current.failed_count += Number(row.failed_count || 0);
+    current.target_language = Array.from(new Set(`${current.target_language || ""},${row.target_language || ""}`.split(",").map((item) => item.trim()).filter(Boolean))).join(", ");
+    for (const language of [row.target_language, ...JSON.parse(row.expected_languages_json || "[]")]) {
+      if (language) current._languages.add(language);
+    }
+    current.target_language = Array.from(current._languages).join(", ");
+    if (row.task_id) current._task_ids.add(String(row.task_id));
+    current.task_id = Array.from(current._task_ids).join(", ");
+    current.started_at = [current.started_at, row.started_at].filter(Boolean).sort()[0] || current.started_at;
+    current.finished_at = [current.finished_at, row.finished_at].filter(Boolean).sort().slice(-1)[0] || current.finished_at;
+    current.last_activity_at = [current.last_activity_at, row.last_activity_at].filter(Boolean).sort().slice(-1)[0] || current.last_activity_at;
+    current._statuses.push(String(row.status || ""));
+    if (current.pm !== row.pm && row.pm) {
+      if (current.pm === "未识别") current.pm = row.pm;
+      else if (row.pm !== "未识别") current.pm = "映射冲突";
+    }
+  }
+  for (const row of groups.values()) {
+    const statuses = row._statuses;
+    if (statuses.includes("运行中")) row.status = "运行中";
+    else if (statuses.includes("联系中断")) row.status = "联系中断";
+    else if (statuses.includes("失败") && statuses.some((item) => item === "完成" || item === "部分失败")) row.status = "部分失败";
+    else if (statuses.includes("部分失败")) row.status = "部分失败";
+    else if (statuses.every((item) => item === "完成")) row.status = "完成";
+    else if (statuses.every((item) => item === "失败")) row.status = "失败";
+    else row.status = statuses[0] || "运行中";
+    const terminal = statuses.length > 0 && statuses.every((item) => ["完成", "部分失败", "失败"].includes(item));
+    row.finished_at = terminal ? row.finished_at : null;
+    delete row._statuses;
+    delete row._languages;
+    delete row._task_ids;
+    delete row.expected_languages_json;
+  }
+  return Array.from(groups.values());
+}
+
+async function markStaleReviewRecords(env) {
+  const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  await env.DB.prepare(
+    `UPDATE review_monitor_records SET status = '联系中断', updated_at = ?
+     WHERE status = '运行中' AND last_activity_at < ?`
+  ).bind(utcNow(), cutoff).run();
+}
+
+async function syncReviewMonitor(env) {
+  await markStaleReviewRecords(env);
+  const rows = mergeReviewMonitorRows(await loadReviewMonitorRows(env));
+  if (!rows.length) return { ok: true, monitor_row_count: 0, created_rows: 0, updated_rows: 0 };
+  const session = await createFeishuSession(env);
+  const monitor = await ensureReviewMonitorTable(session);
+  for (const row of rows) {
+    try {
+      const mappedPm = await resolvePm(env, session, row.pm_fingerprint);
+      if (mappedPm !== "未识别" && mappedPm !== row.pm) {
+        row.pm = mappedPm;
+        await env.DB.prepare("UPDATE review_monitor_records SET pm = ?, updated_at = ? WHERE record_id = ?")
+          .bind(mappedPm, utcNow(), row.record_id).run();
+      }
+    } catch {
+    }
+  }
+  const existing = await listRecords(session, monitor.appToken, monitor.tableId);
+  const byRecordId = new Map();
+  for (const item of existing) {
+    const id = fieldValue(item.fields || {}, [REVIEW_FIELD_RECORD_ID]);
+    if (id) byRecordId.set(id, String(item.record_id || item.id || ""));
+  }
+  const creates = [];
+  const updates = [];
+  for (const row of rows) {
+    const fields = buildReviewMonitorFields(row);
+    const existingId = byRecordId.get(String(row.record_id || ""));
+    if (existingId) updates.push({ record_id: existingId, fields });
+    else creates.push(fields);
+  }
+  const updated = await batchUpdateRecords(session, monitor.appToken, monitor.tableId, updates);
+  const created = await batchCreateRecords(session, monitor.appToken, monitor.tableId, creates);
+  return {
+    ok: true,
+    app_token: monitor.appToken,
+    app_url: monitor.appUrl,
+    monitor_table_id: monitor.tableId,
+    monitor_row_count: rows.length,
+    created_rows: created,
+    updated_rows: updated,
+  };
 }
 
 function decodeBase64Content(encoded) {
@@ -707,7 +1089,8 @@ export default {
         return jsonResponse({ ok: false, message: "Unauthorized" }, 401);
       }
       try {
-        return jsonResponse(await syncTelemetryStats(env));
+        const [stats, review] = await Promise.all([syncTelemetryStats(env), syncReviewMonitor(env)]);
+        return jsonResponse({ ok: true, stats, review });
       } catch (error) {
         return jsonResponse({ ok: false, message: String(error?.message || "Sync failed.") }, 500);
       }
@@ -721,11 +1104,30 @@ export default {
         return jsonResponse({ ok: false, message: "Invalid JSON" }, 400);
       }
       const rows = normalizeEvents(body);
-      if (!rows.length) {
-        return jsonResponse({ ok: true, accepted: 0 });
-      }
-      const written = await writeBatch(env, rows);
+      const written = rows.length ? await writeBatch(env, rows) : 0;
       return jsonResponse({ ok: true, accepted: rows.length, written });
+    }
+
+    if (request.method === "POST" && url.pathname === "/review-monitor") {
+      let body = {};
+      try {
+        body = await request.json();
+      } catch {
+        return jsonResponse({ ok: false, message: "Invalid JSON" }, 400);
+      }
+      const records = normalizeReviewRecords(body);
+      if (!records.length) {
+        return jsonResponse({ ok: true, acknowledged: [] });
+      }
+      try {
+        const resolved = await upsertReviewMonitorRecords(env, records);
+        return jsonResponse({
+          ok: true,
+          acknowledged: resolved.map((record) => ({ record_id: record.record_id, revision: record.revision })),
+        });
+      } catch (error) {
+        return jsonResponse({ ok: false, message: "Review monitor persistence failed." }, 503);
+      }
     }
 
     if (request.method === "POST" && url.pathname === "/feedback") {
@@ -753,6 +1155,6 @@ export default {
   },
 
   async scheduled(_controller, env, ctx) {
-    ctx.waitUntil(syncTelemetryStats(env));
+    ctx.waitUntil(Promise.allSettled([syncTelemetryStats(env), syncReviewMonitor(env)]));
   },
 };

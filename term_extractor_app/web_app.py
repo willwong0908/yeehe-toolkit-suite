@@ -2420,7 +2420,7 @@ INDEX_HTML = """<!doctype html>
       </header>
 
       <section id="toolGuidePage" class="page-section active">
-        <div class="inline-notice" role="note"><span class="inline-notice-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 10.5v5M12 7.5h.01"></path></svg></span><span><strong>隐私优先</strong>仅统计匿名功能触发次数；不会收集文本、文件名、路径、账号或密钥。</span></div>
+        <div class="inline-notice" role="note"><span class="inline-notice-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 10.5v5M12 7.5h.01"></path></svg></span><span><strong>隐私优先</strong>常规功能仅统计匿名触发次数；AI 审校监控会额外记录 PM 归属、文件名和任务运行信息，不上传路径、原译文或明文密钥。</span></div>
         <div class="tool-guide-grid">
           <button class="tool-guide-card tool-guide-card-preprocess" type="button" data-tool-guide="textPreprocess" aria-label="打开文本预处理工具说明">
             <span class="tool-guide-card-top"><span class="tool-guide-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6.5 3.5h7l4 4v13h-11z"></path><path d="M13.5 3.5v4h4M8.5 12h7M8.5 15.5h7"></path></svg></span><span class="tool-guide-badge">批量处理</span></span>

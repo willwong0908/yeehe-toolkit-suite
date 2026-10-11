@@ -30,6 +30,10 @@ from ..recovery_supervisor import (
 )
 from ..scheduler import AdaptiveConcurrencyController, AsyncRequestScheduler
 from ..telemetry import infer_model_tier, track_event
+from .review_monitor import (
+    monitor_task_finished, monitor_task_progress, monitor_task_started,
+    monitor_requested, start_monitor_worker,
+)
 
 DEFAULT_DIRECTIONAL_SYSTEM_PROMPT = """你是专业翻译审校员。你的任务是按照用户指定的定向审校类型，检查译文相对于原文是否存在对应问题。
 
@@ -103,6 +107,8 @@ def create_review_task(
     session_id: str | None = None,
     term_base_id: str | None = None,
     memoq_term_base_ids: list[str] | None = None,
+    monitor_group_id: str | None = None,
+    monitor_expected_languages: dict[str, list[str]] | None = None,
 ) -> str:
     if mode == "directional":
         raise ReviewTaskError("定向审校已移除，请使用提示词模板配置审校规则")
@@ -203,6 +209,8 @@ def create_review_task(
             "memoq_term_base_ids": [str(x) for x in (memoq_term_base_ids or []) if str(x).strip()],
             "memoq_term_pairs": [],
         }
+    config["monitor_group_id"] = str(monitor_group_id or "")
+    config["monitor_expected_languages"] = monitor_expected_languages or {}
     config["memory_snapshot"] = memory_snapshot(str(session_id or "")) if options()['learning_enabled'] else {}
     with get_connection() as conn:
         conn.execute(
@@ -263,6 +271,8 @@ def recover_interrupted_review_tasks() -> int:
             )
     for task_id in task_ids:
         _add_log(task_id, "error", "应用上次退出时任务仍未结束，已标记为中断；请重新发起审校。")
+        monitor_task_finished(task_id, status="中断", error_category="process_exit")
+    start_monitor_worker()
     return len(task_ids)
 
 
@@ -522,6 +532,7 @@ def _run_review_task(task_id: str) -> None:
             _mark_unfinished_review_requests_failed(task_id)
             if task:
                 _update_task(task_id, status="failed")
+                monitor_task_finished(task_id, status="失败", error_category="runtime_error")
                 _track_ai_review_finish(task.get("config") or {}, success=False)
             return
 
@@ -574,9 +585,11 @@ def _run_review_task_impl(task_id: str) -> None:
     api_key = settings.get("api_key", "")
 
     _update_task(task_id, status="running")
+    monitor_task_started(task_id, task["batch_id"], config, items, api_key)
     requested_count = 0
     failed_count = 0
     completed_count = 0
+    cached_count = 0
 
     if enable_ai_review:
         model = config["model"]
@@ -676,6 +689,7 @@ def _run_review_task_impl(task_id: str) -> None:
         _add_log(task_id, "info", f"Session 缓存命中 {cached_count} 条，待请求 {len(request_items)} 条")
         initial_completed = len(existing_completed_ids) + cached_count
         _update_task(task_id, cached_count=cached_count, completed_count=initial_completed)
+        monitor_task_progress(task_id, requested_count=0, cached_count=cached_count)
 
         packages = _build_packages(
             request_items,
@@ -699,6 +713,7 @@ def _run_review_task_impl(task_id: str) -> None:
             _save_review_result(task_id, item["id"], "", "skipped_ai", {})
         completed_count = len(items)
         _update_task(task_id, completed_count=completed_count)
+        monitor_task_progress(task_id, cached_count=completed_count)
 
     if config.get("enable_forbidden_check"):
         _run_forbidden_check(task_id, items, config.get("forbidden_words", []))
@@ -710,11 +725,17 @@ def _run_review_task_impl(task_id: str) -> None:
     except Exception as exc:
         _add_log(task_id, "error", f"结果 Excel 输出失败：{exc}")
         _update_task(task_id, status="completed_with_errors")
+        monitor_task_finished(task_id, status="失败", requested_count=requested_count,
+                              cached_count=cached_count, failed_count=failed_count,
+                              error_category="export_failed")
         _track_ai_review_finish(config, success=False)
         return
 
     final_status = "completed" if failed_count == 0 else "completed_with_errors"
     _update_task(task_id, status=final_status)
+    monitor_task_finished(task_id, status="完成" if failed_count == 0 else "部分失败",
+                          requested_count=requested_count,
+                          cached_count=cached_count, failed_count=failed_count)
     _track_ai_review_finish(config, success=True)
     _add_log(task_id, "info", f"任务完成：成功 {completed_count - failed_count} 条，失败 {failed_count} 条")
 
@@ -898,6 +919,7 @@ async def _run_review_packages(
     def on_request_started(request: LLMRequest) -> None:
         nonlocal requested_count
         package = list(request.metadata.get("package") or [])
+        monitor_requested(task_id, package)
         package_index = int(request.metadata.get("package_index") or 0)
         with counters_lock:
             requested_count += len(package)

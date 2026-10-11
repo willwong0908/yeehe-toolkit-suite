@@ -168,6 +168,31 @@ def init_db() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS review_monitor_outbox (
+                record_id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                group_id TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                revision INTEGER NOT NULL DEFAULT 1,
+                sync_status TEXT NOT NULL DEFAULT 'pending',
+                sync_attempts INTEGER NOT NULL DEFAULT 0,
+                sync_error TEXT NOT NULL DEFAULT '',
+                next_attempt REAL NOT NULL DEFAULT 0
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_review_monitor_outbox_sync ON review_monitor_outbox(sync_status, next_attempt)"
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS review_monitor_items (
+                task_id TEXT NOT NULL, item_id TEXT NOT NULL, record_id TEXT NOT NULL,
+                requested INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(task_id, item_id)
+            )"""
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS review_request_states (
                 id TEXT PRIMARY KEY,
                 task_id TEXT NOT NULL,
