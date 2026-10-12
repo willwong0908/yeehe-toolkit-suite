@@ -412,7 +412,15 @@ async function createBitableTable(session, appToken, name) {
   const data = await feishuJson(session, `/open-apis/bitable/v1/apps/${appToken}/tables`, {
     method: "POST",
     headers: { "content-type": "application/json; charset=utf-8" },
-    body: JSON.stringify({ table: { name, default_view_name: "表格视图" } }),
+    // Feishu requires an initial field when default_view_name is supplied.
+    // The first field becomes the table's primary text field.
+    body: JSON.stringify({
+      table: {
+        name,
+        default_view_name: "表格视图",
+        fields: [{ field_name: REVIEW_FIELD_RECORD_ID, type: 1 }],
+      },
+    }),
   });
   return String(data.table_id || data.table?.table_id || "");
 }
@@ -723,10 +731,23 @@ async function markStaleReviewRecords(env) {
 
 async function syncReviewMonitor(env) {
   await markStaleReviewRecords(env);
-  const rows = mergeReviewMonitorRows(await loadReviewMonitorRows(env));
-  if (!rows.length) return { ok: true, monitor_row_count: 0, created_rows: 0, updated_rows: 0 };
+  // Ensure the monitoring table is visible even before the first release-client
+  // task is reported. Previously the empty D1 state returned early and skipped
+  // table creation entirely.
   const session = await createFeishuSession(env);
   const monitor = await ensureReviewMonitorTable(session);
+  const rows = mergeReviewMonitorRows(await loadReviewMonitorRows(env));
+  if (!rows.length) {
+    return {
+      ok: true,
+      app_token: monitor.appToken,
+      app_url: monitor.appUrl,
+      monitor_table_id: monitor.tableId,
+      monitor_row_count: 0,
+      created_rows: 0,
+      updated_rows: 0,
+    };
+  }
   for (const row of rows) {
     try {
       const mappedPm = await resolvePm(env, session, row.pm_fingerprint);
