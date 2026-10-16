@@ -41,9 +41,18 @@ const REVIEW_MONITOR_FIELDS = [
   [REVIEW_FIELD_MODEL, 1], [REVIEW_FIELD_VERSION, 1], [REVIEW_FIELD_ERROR, 1],
   [REVIEW_FIELD_ACTIVITY, 5],
 ];
-const PM_FIELD_ALIASES = ["PM", "pm", "PM姓名", "负责人", "负责人姓名", "姓名"];
-const KEY_FIELD_ALIASES = ["API Key", "API key", "api_key", "Key", "key", "密钥", "DeepSeek API Key"];
-let pmMappingCache = { loadedAt: 0, map: new Map(), conflicts: new Set(), error: "" };
+const PM_FIELD_ALIASES = ["PM", "pm", "PM姓名", "负责人", "负责人姓名", "姓名", "人员"];
+const KEY_FIELD_ALIASES = ["API Key", "API key", "api key", "api_key", "Key", "key", "密钥", "DeepSeek API Key"];
+let pmMappingCache = {
+  loadedAt: 0,
+  map: new Map(),
+  conflicts: new Set(),
+  error: "",
+  recordCount: 0,
+  mappedCount: 0,
+  skippedCount: 0,
+  fieldNames: [],
+};
 let pmMappingRefreshAt = 0;
 const PM_MAPPING_CACHE_MS = 5 * 60 * 1000;
 const PM_MAPPING_REFRESH_COOLDOWN_MS = 60 * 1000;
@@ -272,11 +281,17 @@ async function loadPmMapping(env, session, force = false) {
     const records = await listRecords(session, getConfiguredAppToken(env), getConfiguredPmMappingTableId(env));
     const map = new Map();
     const conflicts = new Set();
+    const fieldNames = new Set();
+    let skippedCount = 0;
     for (const record of records) {
       const fields = record?.fields || {};
+      for (const fieldName of Object.keys(fields)) fieldNames.add(fieldName);
       const key = fieldValue(fields, KEY_FIELD_ALIASES);
       const pm = fieldValue(fields, PM_FIELD_ALIASES);
-      if (!key || !pm) continue;
+      if (!key || !pm) {
+        skippedCount += 1;
+        continue;
+      }
       const fingerprint = await sha256Hex(key);
       const existing = map.get(fingerprint);
       if (existing && existing !== pm) {
@@ -285,11 +300,31 @@ async function loadPmMapping(env, session, force = false) {
         map.set(fingerprint, pm);
       }
     }
-    pmMappingCache = { loadedAt: now, map, conflicts, error: "" };
+    pmMappingCache = {
+      loadedAt: now,
+      map,
+      conflicts,
+      error: "",
+      recordCount: records.length,
+      mappedCount: map.size,
+      skippedCount,
+      fieldNames: Array.from(fieldNames).sort(),
+    };
   } catch {
     pmMappingCache = { ...pmMappingCache, error: "mapping_unavailable" };
   }
   return pmMappingCache;
+}
+
+function pmMappingSummary() {
+  return {
+    record_count: Number(pmMappingCache.recordCount || 0),
+    mapped_count: Number(pmMappingCache.mappedCount || pmMappingCache.map.size || 0),
+    skipped_count: Number(pmMappingCache.skippedCount || 0),
+    conflict_count: pmMappingCache.conflicts.size,
+    field_names: Array.isArray(pmMappingCache.fieldNames) ? pmMappingCache.fieldNames : [],
+    error: String(pmMappingCache.error || ""),
+  };
 }
 
 async function resolvePm(env, session, fingerprint) {
@@ -746,6 +781,7 @@ async function syncReviewMonitor(env) {
       monitor_row_count: 0,
       created_rows: 0,
       updated_rows: 0,
+      pm_mapping: pmMappingSummary(),
     };
   }
   for (const row of rows) {
@@ -783,6 +819,7 @@ async function syncReviewMonitor(env) {
     monitor_row_count: rows.length,
     created_rows: created,
     updated_rows: updated,
+    pm_mapping: pmMappingSummary(),
   };
 }
 
