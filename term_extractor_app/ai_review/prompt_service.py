@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import uuid
 from typing import Any
 
@@ -7,11 +8,17 @@ from .database import get_connection, utc_now
 
 
 DEFAULT_TEMPLATE_NAME = "\u901a\u7528\u5ba1\u6821"
-DEFAULT_SYSTEM_PROMPT = (
-    "\u4f60\u662f\u4e13\u4e1a\u7ffb\u8bd1\u5ba1\u6821\uff0c"
-    "\u8bf7\u68c0\u67e5\u8bd1\u6587\u662f\u5426\u51c6\u786e\u3001\u81ea\u7136\u3001\u5b8c\u6574\uff0c"
-    "\u5e76\u53ea\u8f93\u51fa\u7b26\u5408\u8981\u6c42\u7684 JSON\u3002"
-)
+DEFAULT_SYSTEM_PROMPT = """你是一名专业的多语言游戏翻译质量审校员。请严格对照原文与译文，全面识别翻译质量问题，确保译文准确、自然、完整，符合游戏语境及目标语言的表达习惯。
+
+审校要求：
+
+1. **准确性与完整性**：逐项核对原文中的关键信息，检查译文是否存在错译、漏译、无依据增译、语义偏差或逻辑关系错误。特别注意否定、条件、数量、程度、范围、指代、因果关系及游戏机制等容易被忽略的细节。即使译文整体通顺，也不能忽略局部错误。
+
+2) **语言正确性**：检查错别字、拼写、语法、词语搭配、表达歧义及明显不自然的表达，同时检查术语、标点、Tag、变量和必要格式是否存在错误。
+
+3. **合理本地化**：接受准确传达原意的意译、口语化及本地化调整，不要求逐字对应。但不得遗漏、改变原文含义，或添加缺乏依据的信息。
+
+只输出符合要求的JSON。"""
 DEFAULT_USER_PROMPT = (
     "\u8bf7\u5ba1\u6821\u4ee5\u4e0b JSON \u6761\u76ee\uff0c\u8fd4\u56de\u4e25\u683c JSON\uff0c"
     "\u4e0d\u8981\u8f93\u51fa\u989d\u5916\u89e3\u91ca\u3002\n\n"
@@ -19,10 +26,8 @@ DEFAULT_USER_PROMPT = (
     "1. \u8fd4\u56de\u683c\u5f0f\u5fc5\u987b\u662f {\"items\":[...]}\u3002\n"
     "2. \u6bcf\u4e2a\u6761\u76ee\u5fc5\u987b\u5305\u542b id\u3001has_issue\u3001issue_type\u3001issue\u3001suggestion\u3002\n"
     "3. \u5982\u679c\u6ca1\u6709\u95ee\u9898\uff0chas_issue \u4e3a false\uff0cissue_type\u3001issue\u3001suggestion \u8fd4\u56de\u7a7a\u5b57\u7b26\u4e32\u3002\n"
-    "4. \u5982\u679c\u6709\u95ee\u9898\uff0cissue_type \u7528\u7b80\u6d01\u5206\u7c7b\uff0c"
-    "\u4f8b\u5982\u6f0f\u8bd1\u3001\u9519\u8bd1\u3001\u8bed\u6cd5\u95ee\u9898\u3001\u683c\u5f0f\u95ee\u9898\u3001\u8bed\u4e49\u4e0d\u6e05\u3002"
-    "\u8fd9\u4e9b\u53ea\u662f\u95ee\u9898\u5f52\u7c7b\u6807\u7b7e\uff0c\u4e0d\u662f\u989d\u5916\u68c0\u67e5\u6e05\u5355\uff0c"
-    "\u4e0d\u8981\u56e0\u4e3a\u6807\u7b7e\u793a\u4f8b\u800c\u6269\u5927\u5ba1\u6821\u8303\u56f4\u3002\n"
+    "4. 如果有问题，issue_type 根据实际发现的错误自行归纳简洁、准确的中文分类。"
+    "分类包括但不限于：错字、语法错误、漏译、多译、错译、术语错误、标点错误、格式错误、Tag错误等。\n"
     "5. \u5982\u679c\u6709\u95ee\u9898\uff0csuggestion \u5fc5\u987b\u53ea\u586b\u5199\u5b8c\u6574\u4fee\u6539\u540e\u7684\u8bd1\u6587\u53e5\u5b50\uff0c\u4e0d\u8981\u89e3\u91ca\uff0c\u4e0d\u8981\u5199\u4fee\u6539\u7406\u7531\uff0c\u4e0d\u8981\u53ea\u5199\u7247\u6bb5\u3002\n"
     "6. \u5982\u679c\u6761\u76ee\u5305\u542b info \u5b57\u6bb5\uff0c\u8bf7\u628a info \u4f5c\u4e3a\u53c2\u8003\u4fe1\u606f\uff1b"
     "info \u4e2d category \u662f\u4fe1\u606f\u7c7b\u522b\uff0cvalue \u662f\u4fe1\u606f\u5185\u5bb9\u3002\n"
@@ -31,25 +36,36 @@ DEFAULT_USER_PROMPT = (
     "\u5f85\u5ba1\u6821 JSON\uff1a\n"
     "{text}"
 )
-DEFAULT_USER_PROMPT_MARKER = "{term_review}"
+# SHA-256 of each shipped (system + NUL + user) pair. Compare the entire pair
+# so editing either prompt protects both from automatic replacement.
+LEGACY_DEFAULT_PROMPT_SIGNATURES = frozenset({
+    "fe179ffcb64297dbfa5e9723e280e69e083ea6ccdfce5ef38a21b89762759fe8",  # 2.2.1-2.2.9
+    "c075c204d0687071cd606d383a9e03e7729efcb113f2a8f1d75680a452e51339",  # 2.1.3-2.2.0
+    "19e2cd9cf9dae83518d5c45c712735e05d93809378c1751295e4b3ff7ec2029e",  # 2.1.1
+    "af47c1c14e744527d875666791b89f79fa982eceb7b59d576ff4bedc7bb8013d",  # Initial default
+})
+
+
+def _prompt_pair_signature(system_prompt: str, user_prompt: str) -> str:
+    # Browsers can save Windows line endings; other whitespace remains exact.
+    normalized = [text.replace("\r\n", "\n").replace("\r", "\n") for text in (system_prompt, user_prompt)]
+    return hashlib.sha256("\0".join(normalized).encode("utf-8")).hexdigest()
 
 
 def ensure_default_prompt_template() -> None:
     with get_connection() as conn:
-        row = conn.execute("SELECT id FROM prompt_templates WHERE is_default = 1 LIMIT 1").fetchone()
+        row = conn.execute(
+            "SELECT id, system_prompt, user_prompt FROM prompt_templates WHERE is_default = 1 LIMIT 1"
+        ).fetchone()
         if row:
-            prompt_row = conn.execute(
-                "SELECT user_prompt FROM prompt_templates WHERE id = ?",
-                (row["id"],),
-            ).fetchone()
-            if prompt_row and DEFAULT_USER_PROMPT_MARKER not in str(prompt_row["user_prompt"] or ""):
+            if _prompt_pair_signature(row["system_prompt"], row["user_prompt"]) in LEGACY_DEFAULT_PROMPT_SIGNATURES:
                 conn.execute(
                     """
                     UPDATE prompt_templates
-                    SET name = ?, system_prompt = ?, user_prompt = ?, updated_at = ?
+                    SET system_prompt = ?, user_prompt = ?, updated_at = ?
                     WHERE id = ?
                     """,
-                    (DEFAULT_TEMPLATE_NAME, DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT, utc_now(), row["id"]),
+                    (DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT, utc_now(), row["id"]),
                 )
             return
         now = utc_now()
