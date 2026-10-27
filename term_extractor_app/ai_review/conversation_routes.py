@@ -76,6 +76,33 @@ class MemoryUpdatePayload(BaseModel):
     rules: list[MemoryRuleEdit]
 
 
+class LearningAnswerPayload(BaseModel):
+    option: int | None = None
+    text: str = ''
+
+
+class MemoryRestorePayload(BaseModel):
+    version: int
+
+
+@router.post('/{session_id}/learning-questions/{question_id}/answer')
+def answer_learning_question(session_id: str, question_id: str, payload: LearningAnswerPayload):
+    from .learning_qa import answer
+    try:
+        return answer(session_id, question_id, option=payload.option, text=payload.text)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post('/{session_id}/memory/restore')
+def restore_memory(session_id: str, payload: MemoryRestorePayload):
+    from .learning_qa import restore_previous
+    try:
+        return restore_previous(session_id, payload.version)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.get('/learning/options')
 def get_learning_options():
     return learning_service.options()
@@ -115,7 +142,11 @@ def learning(session_id: str):
 @router.get('/{session_id}/memory')
 def get_memory(session_id: str):
     snapshot = learning_service.memory_snapshot(session_id)
+    from .database import get_connection
+    with get_connection() as conn:
+        can_restore=bool(conn.execute('SELECT 1 FROM review_memory_history WHERE session_id=? AND version<? LIMIT 1',(session_id,snapshot['version'])).fetchone())
     return {**snapshot,
+            'can_restore':can_restore,
             'active_count': sum(bool(rule.get('active')) for rule in snapshot['rules']),
             'candidate_count': sum(not bool(rule.get('active')) for rule in snapshot['rules'])}
 

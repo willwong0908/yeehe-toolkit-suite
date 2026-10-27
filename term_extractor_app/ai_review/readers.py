@@ -14,6 +14,7 @@ from xml.etree import ElementTree as ET
 from openpyxl.utils import get_column_letter
 
 from ..excel_streaming import open_streaming_workbook
+from .inline_xml import inner_xml
 from .types import ReaderBlock, ReaderDocument
 from .xliff_reader import read_xliff_items, read_xliff_language_metadata
 
@@ -138,6 +139,7 @@ class XliffReader(BaseReader):
                     "target_language": str(metadata.get("target_language") or ""),
                     "segment_id": item.get("segment_id"),
                     "row_number": item.get("row_number"),
+                    "references": list(item.get("info") or []),
                 },
             )
             for item in items
@@ -247,13 +249,21 @@ class XmlReader(BaseReader):
             raise ReaderError(f"XML 解析失败：{exc}") from exc
         blocks: list[ReaderBlock] = []
         counters: dict[str, int] = {}
-        for element in root.iter():
-            value = _text(element.text)
-            if not value:
-                continue
+
+        def collect(element: ET.Element) -> None:
+            # A mixed-content element is one text unit. Its descendants belong
+            # to that unit, so do not emit their text for a second time.
+            has_mixed_text = bool(_text(element.text)) or any(_text(child.tail) for child in element)
+            if not has_mixed_text:
+                for child in element:
+                    collect(child)
+                return
+            value = inner_xml(element)
             tag = element.tag.rsplit("}", 1)[-1]
             counters[tag] = counters.get(tag, 0) + 1
             blocks.append(ReaderBlock(pointer=f"element:{tag}[{counters[tag]}]", text=value, label=tag))
+
+        collect(root)
         if not blocks:
             raise ReaderError("XML 中没有可读取的文本节点")
         return ReaderDocument(

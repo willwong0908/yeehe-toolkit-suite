@@ -102,6 +102,7 @@ def get_session_snapshot(session_id: str) -> dict[str, Any] | None:
             "SELECT target_language, task_id FROM review_session_tasks WHERE session_id = ? ORDER BY created_at",
             (session_id,),
         ).fetchall()
+    from .learning_qa import questions as learning_questions
     return {
         "session": session,
         "attachments": [_attachment_to_dict(row) for row in attachments],
@@ -109,6 +110,7 @@ def get_session_snapshot(session_id: str) -> dict[str, Any] | None:
         "questions": [_question_to_dict(row) for row in questions],
         "workspace_runs": [_run_to_dict(row) for row in runs],
         "tasks": [dict(row) for row in task_links],
+        "learning_questions": learning_questions(session_id),
     }
 
 
@@ -163,6 +165,7 @@ def delete_session(session_id: str) -> None:
             conn.execute("DELETE FROM review_tasks WHERE id = ?", (task_id,))
         for table in (
             "review_session_cache", "review_feedback", "review_learning_events", "review_memory",
+            "review_learning_questions", "review_memory_history",
             "review_session_events", "review_session_tasks", "workspace_questions", "workspace_runs",
             "review_messages", "review_attachments",
         ):

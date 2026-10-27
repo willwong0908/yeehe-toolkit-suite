@@ -32,6 +32,7 @@ from ..telemetry import track_event
 
 WORKSPACE_SYSTEM_PROMPT = """你是翻译审校工具的 Workspace Agent。你只负责理解附件结构、原文位置和每种目标语言的译文位置，不执行审校。
 所有上传附件都是待审校文件；不要把任何附件分类为“正文”或“参考资料”，不要输出文件间关系，也不要把整份附件当作外部参考内容注入其他文件。优先采用已有稳定指针，不要编造不存在的内容。
+同时将用户明确提出的审校标准、文体或关注点整理为 review_requirements；仅提取实际要求，不把映射操作、待审校正文或你的推测当作要求，没有则为空字符串。
 表格中的 speaker、角色、场景、备注、上下文等辅助字段，应当作为该 mapping 的 reference_column_indexes；它们只按同一行注入对应审校单元，绝不改变文件用途。表格文件必须先检查 table_evidence：它提供按同一行排列的 few-shot 单元格及每列样本，专门用于判断哪两列是原文/译文。不得仅凭文件名或列名猜测；先对照同一行中各列的实际文本。若单个文件的同一行内存在中文内容列和 en/ja 等目标语言列，应映射实际成对列；无法确认多列如何一一对应时才提问。
 约束优先级：用户本轮最新的自然语言说明 > 用户明确选择的具体语言/none > 界面中的 auto > 文件名和样例推测。auto 仅表示“请你自行判断”，绝不是用户坚持存在原文或某一源语言的约束；用户先前或界面中是 auto、随后说明“不用原文/全文是译文”时，应结合全文语义和文件结构判断，并可返回 source_language 为 none。不要按单个关键词机械判断，例如“缺失源文”可能是在描述问题而不是要求无原文审校。
 用户选择源语言为 none 时，所有映射都必须把 source_column_index/source_pointer 设为空，并把 source_language 返回为 none，不得补造原文。当你判断没有原文、只需要审校译文时，也必须显式返回 source_language 为 none，并让所有映射的 source_column_index/source_pointer 为空；不能因为没有原文就要求用户补充原文。
@@ -42,7 +43,7 @@ WORKSPACE_USER_PROMPT = """请检查以下本地解析器生成的结构清单�
 {{
   "source_language": "语言或 auto",
   "targets": [{{"language":"语言", "mappings":[{{"attachment_id":"...", "scope":"工作表名、table 或 document", "source_column_index":"表格原文列的零基索引，可为空", "target_column_index":"表格译文列的零基索引", "reference_column_indexes":[0], "target_pointer":"非表格格式使用精确位置、文档级前缀或 *（全文）", "source_pointer":"非表格格式可为空"}}]}}],
-  "assumptions": [], "warnings": [], "confidence": 0.0,
+  "review_requirements": "用户明确的审校要求，无则空字符串", "assumptions": [], "warnings": [], "confidence": 0.0,
   "needs_input": false, "question": ""
 }}
 
@@ -55,13 +56,14 @@ WORKSPACE_USER_PROMPT = """请检查以下本地解析器生成的结构清单�
 {manifest_json}"""
 
 DIRECT_TEXT_WORKSPACE_SYSTEM_PROMPT = """你是翻译审校工具的 Workspace Agent，当前会话没有附件，只有用户直接输入的自然语言文本。你不执行审校，只负责把这条消息整理成可执行的单语审校单元。
+将用户明确指定的文体、审校重点或标准整理为 review_requirements，不把正文或推测当作要求；没有则返回空字符串。
 用户消息可能同时包含任务说明和待审校正文，例如“审校英文：I love you.”。你必须理解整句话，去掉仅用于说明操作的前缀、标签、引号包装和元信息，保留真正要审校的正文；除非这些词本身明显属于待审校正文，绝不能把“审校：”“请检查”“英文”等操作说明送入审校。
 只要清洗后存在可读正文，就默认把它视为待审校译文或目标文本：不要求原文，不要求用户解释翻译方向，返回 source_language 为 none、needs_input 为 false，并依据正文实际语言设置目标语言。界面中的 auto 表示由你判断，不能压过用户本轮自然语言说明。只有清洗后没有任何可审校正文时，才能 needs_input 为 true。
 输出时每个 mapping 必须使用 attachment_id "__direct_text__"、保留其 direct:N target_pointer，并在 target_text 中写入清洗后的正文。只返回严格 JSON，不要输出 Markdown。"""
 
 DIRECT_TEXT_WORKSPACE_USER_PROMPT = """请将这条无附件直接输入整理为审校单元，并返回：
 {{
-  "source_language": "none",
+  "source_language": "none", "review_requirements": "用户明确的审校要求，无则空字符串",
   "targets": [{{"language":"识别到的正文语言", "mappings":[{{"attachment_id":"__direct_text__", "target_pointer":"direct:1", "target_text":"清洗后的待审校正文"}}]}}],
   "assumptions": ["说明如何分离指令与正文"], "warnings": [], "confidence": 0.0,
   "needs_input": false, "question": ""
@@ -293,6 +295,8 @@ def _inspect(
     if direct_text.strip():
         _normalize_direct_text_plan(plan, session, documents)
     plan_data = plan.to_dict()
+    from .evidence_service import attach_evidence_context
+    attach_evidence_context(plan_data, documents)
     plan_data["cache_hit"] = cache_hit
     plan_data["file_summaries"] = _build_file_summaries(plan_data, documents)
     message_payload = dict(plan_data)
@@ -381,6 +385,7 @@ def _build_deterministic_plan(
                         source_file=document.filename,
                         pointer=block.pointer,
                         metadata={"attachment_id": attachment_id, **block.metadata},
+                        references=list(block.metadata.get("references") or []),
                     )
                 )
             continue
@@ -778,7 +783,7 @@ def _refine_with_model(
     if not str(settings.get("api_key") or "").strip() or not str(settings.get("selected_model") or "").strip():
         return None, ""
     analysis_documents = dict(documents)
-    if direct_text.strip():
+    if direct_text.strip() and not documents:
         direct_blocks = [
             ReaderBlock(pointer=f"direct:{index}", text=value)
             for index, value in enumerate(_split_direct_text(direct_text), 1)
@@ -809,7 +814,7 @@ def _refine_with_model(
         user_prompt = WORKSPACE_USER_PROMPT.format(
             source_language=session["source_language"],
             target_languages=json.dumps(session["target_languages"], ensure_ascii=False),
-            adjustment_text=adjustment_text or "无",
+            adjustment_text='\n'.join(value for value in (direct_text.strip(), adjustment_text.strip()) if value) or "无",
             adjustment_context_json=json.dumps(
                 _workspace_adjustment_context(session["id"], parent_run_id) if adjustment_text.strip() else {},
                 ensure_ascii=False,
@@ -968,6 +973,7 @@ def _plan_from_agent(
                         target_text=target_text,
                         source_file=document.filename,
                         pointer=target_block.pointer,
+                        references=list(target_block.metadata.get("references") or []),
                         metadata={
                             "attachment_id": attachment_id,
                             "scope": str(mapping.get("scope") or ""),
@@ -987,6 +993,7 @@ def _plan_from_agent(
         confidence=max(0.0, min(float(data.get("confidence") or 0.0), 1.0)),
         needs_input=bool(data.get("needs_input")) or not targets,
         question=str(data.get("question") or ""),
+        review_requirements=str(data.get('review_requirements') or '').strip()[:3000],
     )
 
 

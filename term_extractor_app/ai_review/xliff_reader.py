@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
+
+from .inline_xml import inner_xml
 
 
 def _strip_namespace(tag: str) -> str:
@@ -10,9 +13,7 @@ def _strip_namespace(tag: str) -> str:
 
 
 def _text_content(element: ET.Element | None) -> str:
-    if element is None:
-        return ""
-    return "".join(element.itertext()).strip()
+    return inner_xml(element, xliff=True)
 
 
 def _first_child_by_local_name(element: ET.Element, name: str) -> ET.Element | None:
@@ -35,13 +36,34 @@ def read_xliff_items(path: Path, source_file: str) -> list[dict[str, Any]]:
             unit_id = unit.attrib.get("id", "")
             segments = [element for element in unit.iter() if _strip_namespace(element.tag) == "segment"]
             for segment in segments:
-                source = _text_content(_first_child_by_local_name(segment, "source"))
-                target = _text_content(_first_child_by_local_name(segment, "target"))
+                source_element = _first_child_by_local_name(segment, "source")
+                target_element = _first_child_by_local_name(segment, "target")
+                source = _text_content(source_element)
+                target = _text_content(target_element)
                 if not source and not target:
                     continue
                 segment_id = segment.attrib.get("id") or unit_id
                 order += 1
-                items.append(_make_item(source_file, segment_id, source, target, order))
+                item = _make_item(source_file, segment_id, source, target, order)
+                original_data = _first_child_by_local_name(unit, "originalData")
+                if original_data is not None:
+                    referenced = {
+                        node.attrib[key]
+                        for element in (source_element, target_element) if element is not None
+                        for node in element.iter()
+                        for key in ("dataRef", "dataRefStart", "dataRefEnd") if key in node.attrib
+                    }
+                    item["inline_code_data"] = {
+                        data.attrib["id"]: "".join(data.itertext())
+                        for data in original_data
+                        if data.attrib.get("id") in referenced
+                    }
+                    if item["inline_code_data"]:
+                        item["info"] = [{
+                            "category": "XLIFF 行内代码定义",
+                            "value": json.dumps(item["inline_code_data"], ensure_ascii=False),
+                        }]
+                items.append(item)
     else:
         units = [element for element in root.iter() if _strip_namespace(element.tag) == "trans-unit"]
         for unit in units:

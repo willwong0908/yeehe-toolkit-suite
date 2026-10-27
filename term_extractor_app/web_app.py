@@ -3333,6 +3333,7 @@ INDEX_HTML = """<!doctype html>
         <span id="reviewMemoryHint" class="hint" aria-live="polite"></span>
         <div class="actions compact-actions">
           <button id="cancelReviewMemoryButton" class="secondary" type="button">取消</button>
+          <button id="restoreReviewMemoryButton" class="secondary" type="button">撤回上次更新</button>
           <button id="saveReviewMemoryButton" class="primary" type="button">保存修改</button>
         </div>
       </div>
@@ -4369,6 +4370,16 @@ html.light-theme .review-memory-rule { background: #f5f8fc; }
 html.light-theme #reviewMemoryOverlay button { color: #334155; background: #f1f5f9; border-color: #cbd5e1; }
 html.light-theme #reviewMemoryOverlay #saveReviewMemoryButton { color: #1d4ed8; background: #eaf2ff; border-color: #bfd4fb; }
 .review-memory-footer { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.review-learning-question { flex: 0 0 auto; width: min(820px, 96%); padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); overflow-wrap: anywhere; }
+.review-learning-question h4 { margin: 0 0 8px; font-size: 15px; }
+.review-learning-question p { margin: 8px 0; white-space: pre-wrap; }
+.review-learning-choices { display: grid; gap: 8px; margin: 12px 0; }
+.review-learning-choices button { min-height: 44px; width: 100%; text-align: left; white-space: normal; font-weight: 400; line-height: 1.6; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.review-learning-choices button strong, .review-learning-choices button span { display: block; }
+.review-learning-choices button span { margin-top: 3px; color: var(--muted); font-size: 12px; }
+.review-learning-question textarea { width: 100%; min-height: 70px; resize: vertical; }
+.review-learning-question button:focus-visible, .review-learning-question textarea:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.review-learning-question .hint { display: block; margin-top: 8px; }
 @media (max-width: 680px) {
   .review-memory-rule { grid-template-columns: 1fr 1fr; }
   .review-memory-rule textarea { grid-column: 1 / -1; }
@@ -6821,6 +6832,7 @@ let reviewFeedbackTaskId = '';
 let reviewFeedbackSessionId = '';
 let reviewFeedbackSaving = false;
 let reviewMemoryState = { sessionId: '', version: 0, rules: [], saving: false };
+const reviewLearningDrafts = new Map();
 let aiReviewFollowupState = { taskId: "", resultId: "", item: null, messages: [] };
 let reviewConversationState = {
   sessions: [],
@@ -8726,7 +8738,7 @@ function renderAiReviewResults(task, results) {
       cells = [
         item.source_text || "",
         item.target_text || "",
-        item.has_issue === null ? "" : item.has_issue ? "是" : "否",
+        item.verification_pending ? "待核实" : item.has_issue === null ? "" : item.has_issue ? "是" : "否",
         item.issue_type || "",
         item.error_message || item.issue || "",
         item.suggestion || "",
@@ -9009,6 +9021,7 @@ function showReviewLearningProgress(status, label) {
     saving: {percent:8, text:'正在保存反馈'},
     queued: {percent:18, text:'学习请求已排队'},
     running: {percent:68, text:'AI 正在更新会话规范'},
+    needs_input: {percent:68, text:'学习范围待确认，请在聊天中回答'},
     completed: {percent:100, text:'会话规范已更新'},
     failed: {percent:100, text:'会话规范更新失败'},
     uploading: {percent:10, text:'正在上传并校验反馈文件'}
@@ -9022,7 +9035,7 @@ function showReviewLearningProgress(status, label) {
   box.hidden = false;
   box.className = `review-learning-progress ${status}`;
   $('reviewLearningProgressLabel').textContent = label || view.text;
-  $('reviewLearningProgressValue').textContent = `${view.percent}%`;
+  $('reviewLearningProgressValue').textContent = status === 'needs_input' ? '待确认' : `${view.percent}%`;
   $('reviewLearningProgressBar').style.width = `${view.percent}%`;
 }
 
@@ -9093,6 +9106,16 @@ function renderReviewMemoryRules() {
         example.appendChild(field);
       }
       row.appendChild(example);
+      const scopeLines = [['适用范围',rule.scope],['判断依据',rule.principle],['边界',rule.boundary]]
+        .filter(([,value])=>String(value || '').trim());
+      if (scopeLines.length || rule.feedback_sources?.length || rule.manual_edited || rule.manual_example) {
+        const evidence = document.createElement('details');evidence.className = 'review-memory-example';
+        const summary = document.createElement('summary');summary.textContent = '查看适用范围与反馈依据';evidence.appendChild(summary);
+        scopeLines.forEach(([label,value])=>{const line=document.createElement('p');line.textContent=`${label}：${value}`;evidence.appendChild(line);});
+        (rule.feedback_sources || []).slice(-3).forEach(source=>{const line=document.createElement('p');line.textContent=`用户${source.decision === 'agree' ? '认可报错' : '忽略报错'}：${source.reason}`;evidence.appendChild(line);});
+        if (rule.manual_edited || rule.manual_example) {const line=document.createElement('p');line.textContent='手动编辑的内容会保留，不由 AI 自动覆盖。';evidence.appendChild(line);}
+        row.appendChild(evidence);
+      }
       section.appendChild(row);
     });
     list.appendChild(section);
@@ -9109,6 +9132,7 @@ async function openReviewMemoryDialog() {
     const memory = await api(`/api/ai-review/conversations/${encodeURIComponent(sessionId)}/memory`);
     if (sessionId !== reviewConversationState.currentId) { closeReviewMemoryDialog(); return; }
     reviewMemoryState = {sessionId, version:Number(memory.version || 0), rules:memory.rules || [], saving:false};
+    $('restoreReviewMemoryButton').disabled = !memory.can_restore;
     $('reviewMemoryHint').textContent = '';
     renderReviewMemoryRules();
   } catch (error) {
@@ -9179,6 +9203,11 @@ async function refreshReviewLearningStatus() {
     : '会话记忆 · 暂无规范'));
   const event = (status.events || [])[0];
   showReviewLearningProgress(event?.status || '');
+  if (reviewConversationState.snapshot) {
+    const before = JSON.stringify(reviewConversationState.snapshot.learning_questions || []);
+    reviewConversationState.snapshot.learning_questions = status.questions || [];
+    if (before !== JSON.stringify(status.questions || [])) renderReviewConversationSnapshot();
+  }
   if (event?.status === 'failed') {
     $('reviewLearningProgressLabel').textContent = `会话规范更新失败：${event.error || '未知错误'}`;
     const line = document.createElement('div');
@@ -9752,6 +9781,7 @@ function renderReviewMessages(messages, questions) {
       container.scrollTop = container.scrollHeight;
     });
   }
+  renderLearningQuestion(container);
   const latestRun = reviewConversationState.snapshot?.workspace_runs?.[0] || null;
   const latestRunId = String(latestRun?.id || "");
   const hasExecutablePlan = Boolean((latestRun?.plan?.targets || []).some((target) => Array.isArray(target?.units) && target.units.length));
@@ -9798,6 +9828,75 @@ async function submitReviewDecision(question, action, answer) {
     body: JSON.stringify({ run_id: question.run_id, question_id: question.id, action, answer: answer || action }),
   });
   await refreshCurrentReviewConversation();
+}
+
+function renderLearningQuestion(container) {
+  const pending = reviewConversationState.snapshot?.learning_questions || [];
+  const question = pending[0];
+  if (!question) return;
+  const sessionId = reviewConversationState.currentId;
+  const card = document.createElement('section');
+  card.className = 'review-learning-question';
+  card.setAttribute('aria-label', '确认学习范围');
+  const title = document.createElement('h4');
+  title.textContent = `确认学习范围${pending.length > 1 ? ` · 还有 ${pending.length - 1} 个疑点` : ''}`;
+  const prompt = document.createElement('p'); prompt.textContent = question.prompt;
+  card.append(title, prompt);
+  const examples = document.createElement('details');
+  const summary = document.createElement('summary'); summary.textContent = '查看对应原译文与反馈';
+  examples.appendChild(summary);
+  (question.examples || []).forEach(example => {
+    const text = document.createElement('p');
+    text.textContent = `原文：${example.source}\n译文：${example.target}\n原报错：${example.issue}\n反馈理由：${example.reason || '未填写'}`;
+    examples.appendChild(text);
+  });
+  card.appendChild(examples);
+  const choices = document.createElement('div');choices.className = 'review-learning-choices';
+  const hint = document.createElement('span');hint.className = 'hint';hint.setAttribute('role','status');
+  const send = async payload => {
+    card.querySelectorAll('button').forEach(button => button.disabled = true);
+    hint.textContent = '正在保存你的解释…';
+    try {
+      await api(`/api/ai-review/conversations/${encodeURIComponent(sessionId)}/learning-questions/${encodeURIComponent(question.id)}/answer`, {method:'POST',body:JSON.stringify(payload)});
+      reviewLearningDrafts.delete(question.id);
+      if (sessionId === reviewConversationState.currentId) { await refreshCurrentReviewConversation();await refreshReviewLearningStatus(); }
+    } catch(error) {
+      hint.textContent = error.message;
+      card.querySelectorAll('button').forEach(button => button.disabled = false);
+    }
+  };
+  (question.options || []).forEach((option,index) => {
+    const button = document.createElement('button');button.type = 'button';
+    const title = document.createElement('strong');title.textContent = `${index + 1}. ${option.label}${index === 0 ? '（推荐）' : ''}`;
+    const explanation = document.createElement('span');explanation.textContent = option.reason;
+    const scope = document.createElement('span');scope.textContent = option.scope === 'case' ? '学习范围：当前案例' : '学习范围：确认的同类语境';
+    button.append(title,explanation,scope);
+    button.addEventListener('click', () => {
+      if (option.requires_reason) { card.querySelector('textarea').focus();hint.textContent = option.reason;return; }
+      send({option:index});
+    });choices.appendChild(button);
+  });
+  card.appendChild(choices);
+  const label = document.createElement('label');label.textContent = '3. 自行输入其他原因';
+  const input = document.createElement('textarea');input.maxLength = 2000;
+  input.setAttribute('aria-label','自行输入学习原因');input.value = reviewLearningDrafts.get(question.id) || '';
+  input.addEventListener('input',()=>reviewLearningDrafts.set(question.id,input.value));
+  label.appendChild(input);card.appendChild(label);
+  const submit = document.createElement('button');submit.type = 'button';submit.className = 'secondary';submit.textContent = '提交说明';
+  submit.addEventListener('click',()=>{if (!input.value.trim()) {hint.textContent = '请填写原因或选择上方解释';input.focus();return;}send({text:input.value.trim()});});
+  card.append(submit,hint);container.appendChild(card);
+}
+
+async function restoreReviewMemory() {
+  if (!reviewMemoryState.sessionId || reviewMemoryState.saving) return;
+  $('restoreReviewMemoryButton').disabled = true;
+  try {
+    const memory = await api(`/api/ai-review/conversations/${encodeURIComponent(reviewMemoryState.sessionId)}/memory/restore`, {method:'POST',body:JSON.stringify({version:reviewMemoryState.version})});
+    reviewMemoryState.version = memory.version;reviewMemoryState.rules = memory.rules || [];
+    renderReviewMemoryRules();$('reviewMemoryHint').textContent = '已恢复更新前的规范';
+    await refreshCurrentReviewConversation();
+  } catch(error) { $('reviewMemoryHint').textContent = error.message; }
+  finally { $('restoreReviewMemoryButton').disabled = false; }
 }
 
 function renderReviewAttachments(attachments) {
@@ -9872,7 +9971,7 @@ function connectReviewConversationEvents(sessionId) {
   const eventNames = [
     "message.created", "attachment.uploaded", "attachment.deleted", "attachment.inspected", "workspace.started", "workspace.ready",
     "workspace.needs_input", "workspace.failed", "workspace.question", "review.started", "review.progress",
-    "review.request_status", "review.package_completed", "review.completed",
+    "review.request_status", "review.package_completed", "review.completed", "learning.updated",
   ];
   eventNames.forEach((name) => source.addEventListener(name, (event) => {
     reviewConversationState.eventCursor = Math.max(reviewConversationState.eventCursor, Number(event.lastEventId || 0));
@@ -12289,6 +12388,7 @@ $('reviewFeedbackFileInput').addEventListener('change', async () => {
   finally { $('reviewFeedbackUploadButton').disabled = false; $('reviewFeedbackFileInput').value = ''; }
 });
 $('reviewMemoryButton').addEventListener('click', () => openReviewMemoryDialog().catch(showReviewConversationError));
+$('restoreReviewMemoryButton').addEventListener('click', restoreReviewMemory);
 $('saveReviewMemoryButton').addEventListener('click', () => saveReviewMemory().catch(showReviewConversationError));
 $('closeReviewMemoryButton').addEventListener('click', closeReviewMemoryDialog);
 $('cancelReviewMemoryButton').addEventListener('click', closeReviewMemoryDialog);

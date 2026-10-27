@@ -135,6 +135,7 @@ class ExtractionPlan:
     confidence: float = 0.0
     needs_input: bool = False
     question: str = ""
+    review_requirements: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -145,4 +146,5 @@ class ExtractionPlan:
             "confidence": self.confidence,
             "needs_input": self.needs_input,
             "question": self.question,
+            "review_requirements": self.review_requirements,
         }

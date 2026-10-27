@@ -16,6 +16,17 @@ from term_extractor_app.ai_review.conversation_routes import router
 from term_extractor_app.ai_review.session_store import create_session, delete_session
 
 
+def learning_reply(new_rules=(), triggered_ids=(), few_shot_updates=()):
+    rules=[]
+    for entry in new_rules:
+        item={'text':entry} if isinstance(entry,str) else dict(entry)
+        item.update(scope='用户反馈确认的文本语境',principle='根据用户理由判断',boundary='不豁免其他独立错误',feedback_indexes=[0])
+        rules.append(item)
+    return db.dumps_json({'protocol':2,'triggered_ids':list(triggered_ids),'new_rules':rules,
+        'associations':[{'id':id_,'feedback_indexes':[0],'reason':'同一适用范围的反馈'} for id_ in triggered_ids],
+        'few_shot_updates':list(few_shot_updates),'questions':[],'case_only_indexes':[]})
+
+
 class ReviewLearningTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -50,7 +61,7 @@ class ReviewLearningTests(unittest.TestCase):
         for p in reversed(self.patches): p.stop()
         self.temp.cleanup()
 
-    def feedback(self, index=0, reason='符合上下文'):
+    def feedback(self, index=0, reason='当前是宣传短句，允许自然改写，不应要求逐词对应'):
         return learning.submit_feedback(self.session, 't', [{'result_id':self.results[index]['id'], 'decision':'disagree', 'reason':reason}])
 
     def test_defaults_and_settings_api(self):
@@ -134,8 +145,8 @@ class ReviewLearningTests(unittest.TestCase):
 
     def test_few_shot_worker_persistence_manual_edit_and_session_delete(self):
         self.feedback()
-        reply = db.dumps_json({'triggered_ids':[], 'new_rules':[{'text':'norm', 'few_shot':{
-            'feedback_index':0, 'source_text':'source0', 'target_text':'target0'}}]})
+        reply = learning_reply([{'text':'norm', 'few_shot':{
+            'feedback_index':0, 'source_text':'source0', 'target_text':'target0'}}])
         with patch('term_extractor_app.ai_review.shared_provider.followup_chat', return_value=reply):
             learning._learning_worker(self.session)
         url = f'/api/ai-review/conversations/{self.session}/memory'
@@ -183,8 +194,8 @@ class ReviewLearningTests(unittest.TestCase):
 
     def test_invalid_case_keeps_memory_and_feedback_for_retry(self):
         self.feedback()
-        reply = db.dumps_json({'triggered_ids':[], 'new_rules':[{'text':'norm', 'few_shot':{
-            'feedback_index':0, 'source_text':'invented', 'target_text':'target0'}}]})
+        reply = learning_reply([{'text':'norm', 'few_shot':{
+            'feedback_index':0, 'source_text':'invented', 'target_text':'target0'}}])
         with patch('term_extractor_app.ai_review.shared_provider.followup_chat', return_value=reply):
             learning._learning_worker(self.session)
         self.assertEqual(learning.memory_snapshot(self.session)['version'], 0)
@@ -198,7 +209,7 @@ class ReviewLearningTests(unittest.TestCase):
         self.feedback()
         def respond(**kwargs):
             learning.update_memory(self.session, 1, [{'id':'a', 'text':'manual edit'}])
-            return db.dumps_json({'triggered_ids':['a'], 'new_rules':[]})
+            return learning_reply(triggered_ids=['a'])
         with patch('term_extractor_app.ai_review.shared_provider.followup_chat', side_effect=respond):
             learning._learning_worker(self.session)
         self.assertEqual(learning.memory_snapshot(self.session)['rules'][0]['text'], 'manual edit')
@@ -246,7 +257,7 @@ class ReviewLearningTests(unittest.TestCase):
             learning._learning_worker(self.session)
         self.assertEqual(learning.memory_snapshot(self.session)['version'],0)
         learning.retry_learning(self.session,event['event_id'])
-        with patch('term_extractor_app.ai_review.shared_provider.followup_chat',return_value='{"triggered_ids":[],"new_rules":["规范"]}'):
+        with patch('term_extractor_app.ai_review.shared_provider.followup_chat',return_value=learning_reply(['规范'])):
             learning._learning_worker(self.session)
         learning.retry_learning(self.session,event['event_id'])
         with patch('term_extractor_app.ai_review.shared_provider.followup_chat') as call:
@@ -262,7 +273,7 @@ class ReviewLearningTests(unittest.TestCase):
             calls.append(payload['operation'])
             time.sleep(.05)
             old=payload['old_rules']
-            return db.dumps_json({'triggered_ids':[old[0]['id']] if old else [], 'new_rules':[] if old else ['参考规范']})
+            return learning_reply([] if old else ['参考规范'],[old[0]['id']] if old else [])
         self.patches[2].stop()
         with patch('term_extractor_app.ai_review.shared_provider.followup_chat',side_effect=respond):
             learning.start_learning(self.session); learning.start_learning(self.session)
@@ -305,7 +316,7 @@ class ReviewLearningTests(unittest.TestCase):
             {'result_id':self.results[1]['id'], 'decision':'agree', 'reason':'确实有错'},
         ])
         with patch('term_extractor_app.ai_review.shared_provider.followup_chat',
-                   return_value='{"triggered_ids":[],"new_rules":["结合文体判断自然改写"]}') as call:
+                   return_value=learning_reply(['结合文体判断自然改写'])) as call:
             learning._learning_worker(self.session)
         payload=db.loads_json(call.call_args.kwargs['messages'][-1]['content'], {})
         self.assertEqual(len(payload['feedback']),1)
@@ -366,9 +377,9 @@ class ReviewLearningTests(unittest.TestCase):
         del book['_review_meta']; buf=io.BytesIO(); book.save(buf); book.close()
         with self.assertRaises(ValueError): learning.import_feedback(self.session,buf.getvalue())
 
-    def test_agree_no_learning_and_formula_safe_export(self):
+    def test_agree_feedback_is_learnable_and_formula_safe_export(self):
         result=learning.submit_feedback(self.session,'t',[{'result_id':self.results[0]['id'],'decision':'agree','reason':'=HYPERLINK("bad")'}])
-        self.assertFalse(result['event_id'])
+        self.assertTrue(result['event_id'])
         book=load_workbook(result['output_path']); self.assertEqual(book['审校结果']['K2'].data_type,'s'); book.close()
         self.assertTrue(review.get_review_results('t')[0]['has_issue'])
 
@@ -389,13 +400,13 @@ class ReviewLearningTests(unittest.TestCase):
 
     def test_learning_create_update_and_failure_preserves_old(self):
         first=self.feedback()
-        with patch('term_extractor_app.ai_review.shared_provider.followup_chat', return_value='{"triggered_ids":[],"new_rules":["英语中自然的名词表达不机械替换为动词"]}') as call:
+        with patch('term_extractor_app.ai_review.shared_provider.followup_chat', return_value=learning_reply(['英语中自然的名词表达不机械替换为动词'])) as call:
             learning._learning_worker(self.session)
             self.assertEqual(call.call_count,1)
         memory=learning.memory_snapshot(self.session)
         self.assertEqual(memory['version'],1)
         self.feedback(1)
-        reply=db.dumps_json({'triggered_ids':[memory['rules'][0]['id']],'new_rules':[]})
+        reply=learning_reply(triggered_ids=[memory['rules'][0]['id']])
         with patch('term_extractor_app.ai_review.shared_provider.followup_chat',return_value=reply): learning._learning_worker(self.session)
         self.assertEqual(learning.memory_snapshot(self.session)['rules'][0]['weight'],2)
         self.feedback(2)
@@ -408,13 +419,13 @@ class ReviewLearningTests(unittest.TestCase):
         self.feedback()
         def late(**kwargs):
             delete_session(self.session)
-            return '{"triggered_ids":[],"new_rules":["参考规范"]}'
+            return learning_reply(['参考规范'])
         with patch('term_extractor_app.ai_review.shared_provider.followup_chat',side_effect=late): learning._learning_worker(self.session)
         learning.cache_results(self.session, [(self.items[0],{'has_issue':False})])
         self.assertEqual(learning.memory_snapshot(self.session)['version'],0)
         self.assertEqual(learning.cached_results(self.session,['k0']),{})
 
-    def test_workflow_batches_only_misses_and_memory_does_not_change_cache(self):
+    def test_workflow_rechecks_changed_memory_and_batches_only_content_misses(self):
         with db.get_connection() as conn:
             conn.execute('DELETE FROM review_results')
         packages=[]
@@ -433,6 +444,12 @@ class ReviewLearningTests(unittest.TestCase):
                 conn.execute('DELETE FROM review_results')
                 config={**self.config,'memory_snapshot':{'version':2,'rules':[{'text':'new memory','active':True}]}}
                 conn.execute('UPDATE review_tasks SET config_json=? WHERE id=?',(db.dumps_json(config),'t'))
+            review._run_review_task_impl('t')
+            self.assertEqual(sum(len(p) for p in packages),3)
+            self.assertEqual(review.get_review_task('t')['cached_count'],0)
+            packages.clear()
+            with db.get_connection() as conn:
+                conn.execute('DELETE FROM review_results')
             review._run_review_task_impl('t')
             self.assertEqual(packages,[])
             self.assertEqual(review.get_review_task('t')['cached_count'],3)

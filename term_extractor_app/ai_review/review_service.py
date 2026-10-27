@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import json
 import logging
 import traceback
 import threading
+import time
 import uuid
 from typing import Any
 
@@ -19,6 +21,7 @@ from .session_store import emit_event
 from .term_base_service import get_term_base, match_terms
 from .memoq_service import lookup_terms_snapshot, MemoQError
 from .learning_service import cached_results, cache_results, memory_snapshot, memory_prompt, options
+from .evidence_service import EvidenceIndex, EVIDENCE_INSTRUCTION, suggestion_problem, verify_response
 from ..models import LLMRequest, LLMResponse
 from ..logging_utils import LOGGER_NAME, configure_file_logger
 from ..providers import ProviderRegistry
@@ -109,6 +112,8 @@ def create_review_task(
     memoq_term_base_ids: list[str] | None = None,
     monitor_group_id: str | None = None,
     monitor_expected_languages: dict[str, list[str]] | None = None,
+    review_requirements: str = "",
+    frozen_memory: dict[str, Any] | None = None,
 ) -> str:
     if mode == "directional":
         raise ReviewTaskError("定向审校已移除，请使用提示词模板配置审校规则")
@@ -211,7 +216,9 @@ def create_review_task(
         }
     config["monitor_group_id"] = str(monitor_group_id or "")
     config["monitor_expected_languages"] = monitor_expected_languages or {}
-    config["memory_snapshot"] = memory_snapshot(str(session_id or "")) if options()['learning_enabled'] else {}
+    config["memory_snapshot"] = copy.deepcopy(frozen_memory) if frozen_memory is not None else (memory_snapshot(str(session_id or "")) if options()['learning_enabled'] else {})
+    config["evidence_enabled"] = bool(enable_ai_review and mode == "normal")
+    config["review_requirements"] = str(review_requirements or "").strip()[:3000]
     with get_connection() as conn:
         conn.execute(
             """
@@ -644,7 +651,7 @@ def _run_review_task_impl(task_id: str) -> None:
                     f"术语表 {config.get('term_base_name') or term_base_id} 已匹配 {term_match_count} 个术语条目。",
                 )
         prompt_signature = _prompt_signature(
-            config["system_prompt"],
+            _effective_system_prompt(config),
             config["user_prompt"],
             config.get("source_language", ""),
             config.get("target_language", ""),
@@ -676,8 +683,11 @@ def _run_review_task_impl(task_id: str) -> None:
             item_with_cache = {**item, "cache_key": cache_key}
             keyed_items.append(item_with_cache)
         cache = {} if config.get('term_lookup_failed') else cached_results(str(config.get("session_id") or ""), [item["cache_key"] for item in keyed_items])
+        evidence_index = EvidenceIndex(items, config)
         for item_with_cache in keyed_items:
             cached = cache.get(item_with_cache["cache_key"])
+            if cached is not None and not evidence_index.cache_valid(item_with_cache, cached):
+                cached = None
             if cached is None:
                 request_items.append(item_with_cache)
             else:
@@ -705,6 +715,7 @@ def _run_review_task_impl(task_id: str) -> None:
                 config=config,
                 packages=packages,
                 initial_completed=initial_completed,
+                corpus=items,
             )
         )
     else:
@@ -767,6 +778,7 @@ async def _run_review_packages(
     config: dict[str, Any],
     packages: list[list[dict[str, Any]]],
     initial_completed: int = 0,
+    corpus: list[dict[str, Any]] | None = None,
 ) -> tuple[int, int, int]:
     """Run independent review packages concurrently with adaptive backpressure."""
     if not packages:
@@ -774,6 +786,7 @@ async def _run_review_packages(
 
     provider_name, provider_settings = _load_review_provider(api_key, model)
     adapter = ProviderRegistry.create_adapter(provider_name, provider_settings)
+    evidence_index = EvidenceIndex(corpus or [item for package in packages for item in package], config)
 
     def on_stream_phase(package_index: int, phase: str) -> None:
         _set_review_request_status(task_id, package_index, phase)
@@ -807,7 +820,7 @@ async def _run_review_packages(
                 task_type="candidate_review_batch",
                 prompt=user_prompt,
                 messages=[
-                    {"role": "system", "content": memory_prompt(config.get("memory_snapshot", {})) + config["system_prompt"]},
+                    {"role": "system", "content": _effective_system_prompt(config)},
                     {"role": "user", "content": user_prompt},
                 ],
                 metadata=metadata,
@@ -879,6 +892,12 @@ async def _run_review_packages(
                     )
                 else:
                     result = _normalize_result(result_by_id.get(item["id"]), item["id"])
+                if isinstance(result_by_id.get(item['id'], {}).get('_verification'), dict):
+                    result['_verification'] = result_by_id[item['id']]['_verification']
+                active_rule_ids={rule.get('id') for rule in config.get('memory_snapshot',{}).get('rules',[]) if rule.get('active')}
+                used_rules=result_by_id.get(item['id'],{}).get('rule_refs',[])
+                if isinstance(used_rules,list):
+                    result['_rule_refs']=[id_ for id_ in used_rules if isinstance(id_,str) and id_ in active_rule_ids]
                 result['_term_reference'] = _build_request_payload([item], config).get('term_pairs', [])
                 saved_results.append((item, result))
             _save_review_results_bulk(task_id, saved_results)
@@ -960,7 +979,15 @@ async def _run_review_packages(
             ),
         )
         try:
+            attempt_started=time.monotonic()
             response = await original_send_prompt(request, attempt=attempt)
+            if config.get('evidence_enabled') and response.success:
+                response = await verify_response(
+                    request, response, index=evidence_index, send=original_send_prompt,
+                    config=config, parse=_parse_json_object, validate=_validate_response_items,
+                    log=lambda message: _add_log(task_id, 'info', message),
+                    timeout_seconds=min(30,max(0,int(provider_settings.timeout_seconds or 90)-3-(time.monotonic()-attempt_started))),
+                )
         except Exception as exc:
             _add_log(
                 task_id,
@@ -1152,6 +1179,11 @@ def _validate_response_items(
             for key in ("issue_type", "issue", "suggestion"):
                 if not isinstance(item[key], str):
                     raise ReviewTaskError(f"AI 返回条目 {item_id} 的 {key} 必须是字符串")
+            if config.get('evidence_enabled'):
+                source_item = next((entry for entry in package if str(entry['id']) == item_id), {})
+                problem = suggestion_problem(source_item, item)
+                if problem:
+                    raise ReviewTaskError(f'AI 返回条目 {item_id}：{problem}，请返回完整修改后译文')
     if len(returned_ids) != len(expected_ids):
         raise ReviewTaskError(f"AI 返回 {len(returned_ids)} 条，预期 {len(expected_ids)} 条")
     if len(set(returned_ids)) != len(returned_ids):
@@ -1405,6 +1437,10 @@ def _build_user_prompt(
     prompt = template.replace("{text}", text)
     if term_instruction and not had_placeholder:
         prefixes.append(term_instruction)
+    if config.get('evidence_enabled'):
+        prompt += ('\n\n本工具的返回协议：保留上面的完整 items，同时在顶层返回 context_requests 数组；'
+                   '无疑点时为 []。有需要核实的用途、项目惯例或标签展开时，按系统定义填写具体请求，'
+                   '这属于JSON结构字段，不是额外解释。返回结构为 {"items":[...],"context_requests":[...]}。')
     return "\n".join([*prefixes, prompt]) if prefixes else prompt
 
 
@@ -1484,6 +1520,16 @@ def _cache_key(
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _effective_system_prompt(config: dict[str, Any]) -> str:
+    """Use the same frozen instructions for cache identity and model requests."""
+    prompt = memory_prompt(config.get("memory_snapshot", {})) + config["system_prompt"]
+    if config.get('review_requirements'):
+        prompt += '\n\n用户本次明确审校要求（优先于学习规范）：\n' + str(config['review_requirements'])
+    if config.get('evidence_enabled'):
+        prompt += '\n\n' + EVIDENCE_INSTRUCTION
+    return prompt
+
+
 def _prompt_signature(
     system_prompt: str,
     user_prompt: str,
@@ -1493,6 +1539,7 @@ def _prompt_signature(
 ) -> str:
     raw = dumps_json(
         {
+            "review_input_version": 2,
             "system_prompt": system_prompt,
             "user_prompt": user_prompt,
             "source_language": source_language,
@@ -1824,11 +1871,13 @@ def _task_to_dict(row: Any) -> dict[str, Any]:
 
 
 def _result_to_dict(row: Any) -> dict[str, Any]:
+    verification=(loads_json(row['raw_result_json'],{}).get('_verification') or {}) if 'raw_result_json' in row.keys() else {}
     return {
         "id": row["id"],
         "item_id": row["item_id"],
         "status": row["status"],
         "has_issue": bool(row["has_issue"]) if row["has_issue"] is not None else None,
+        "verification_pending": bool(verification.get('unresolved')) and not bool(row['has_issue']),
         "issue_type": row["issue_type"],
         "issue": row["issue"],
         "suggestion": row["suggestion"],

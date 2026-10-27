@@ -22,7 +22,12 @@ from term_extractor_app.web_app import app
 
 
 HOST = "127.0.0.1"
-PORT = 8765
+try:
+    PORT = int(os.environ.get('YEEHE_WEBUI_PORT', '8765'))
+    if not 1 <= PORT <= 65535:
+        PORT = 8765
+except ValueError:
+    PORT = 8765
 URL = f"http://{HOST}:{PORT}/"
 
 LOGGER = configure_file_logger(get_app_paths(), with_console=False)
@@ -123,7 +128,8 @@ def _open_browser_when_ready(existing_service: bool = False) -> None:
             _log_console(f"  已启动：{URL}")
             _log_console("  浏览器已打开。保持本窗口开启即可使用工具。")
         try:
-            webbrowser.open(URL)
+            if os.environ.get('YEEHE_DISABLE_BROWSER_AUTOOPEN') != '1':
+                webbrowser.open(URL)
             _log_file("info", "Browser open requested for %s", URL)
         except Exception:
             LOGGER.exception("[WEBUI] Failed to open browser for %s", URL)

@@ -19,6 +19,7 @@ from .session_store import (
     update_session,
 )
 from .workspace_service import save_confirmed_profile
+from .learning_service import memory_snapshot, options as learning_options
 from ..telemetry import track_event
 
 
@@ -49,6 +50,7 @@ def start_session_review(session_id: str, run_id: str | None = None) -> list[dic
         for source_file in {str(unit.get("source_file") or "直接输入") for unit in target["units"]}:
             monitor_expected_languages.setdefault(source_file, []).append(language)
     created: list[dict[str, str]] = []
+    frozen_memory=memory_snapshot(session_id) if learning_options()['learning_enabled'] else {}
     for target in targets:
         language = str(target.get("language") or "auto")
         units = list(target.get("units") or [])
@@ -103,6 +105,8 @@ def start_session_review(session_id: str, run_id: str | None = None) -> list[dic
             memoq_term_base_ids=session.get("memoq_term_base_ids") or [],
             monitor_group_id=monitor_group_id,
             monitor_expected_languages=monitor_expected_languages,
+            review_requirements=str(plan.get('review_requirements') or ''),
+            frozen_memory=frozen_memory,
         )
         link_task(session_id, language, task_id)
         created.append({"target_language": language, "task_id": task_id})
