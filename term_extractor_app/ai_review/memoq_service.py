@@ -242,6 +242,13 @@ def _language_code(value: str) -> str:
         "自动": "", "自动检测": "", "auto": "", "无": "", "无源文": "",
         "简体中文": "zho-CN", "繁体中文": "zho-TW", "英语": "eng", "日语": "jpn", "韩语": "kor",
         "法语": "fra", "德语": "deu", "西班牙语": "spa", "葡萄牙语": "por", "意大利语": "ita",
+        "葡萄牙语（巴西）": "por-BR", "葡萄牙语（葡萄牙）": "por-PT",
+        "巴葡": "por-BR", "欧葡": "por-PT",
         "俄语": "rus", "阿拉伯语": "ara", "泰语": "tha", "越南语": "vie", "印尼语": "ind",
     }
-    return aliases.get(str(value or "").strip(), str(value or "").strip())
+    text = str(value or "").strip()
+    regional = {
+        "pt-br": "por-BR", "por-br": "por-BR", "portuguese (brazil)": "por-BR",
+        "pt-pt": "por-PT", "por-pt": "por-PT", "portuguese (portugal)": "por-PT",
+    }
+    return regional.get(text.lower().replace("_", "-"), aliases.get(text, text))

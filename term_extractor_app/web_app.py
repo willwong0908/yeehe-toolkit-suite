@@ -6869,6 +6869,7 @@ let preprocessFiles = [];
 let preprocessActiveFile = null;
 const reviewLanguages = [
   "自动检测", "无源文", "简体中文", "繁体中文", "英语", "日语", "韩语", "法语", "德语", "西班牙语", "葡萄牙语",
+  "葡萄牙语（巴西）", "葡萄牙语（葡萄牙）",
   "意大利语", "俄语", "阿拉伯语", "泰语", "越南语", "印尼语", "土耳其语", "波兰语", "荷兰语", "瑞典语",
   "挪威语", "丹麦语", "芬兰语", "捷克语", "匈牙利语", "罗马尼亚语", "希腊语", "希伯来语", "乌克兰语",
 ];
@@ -6882,6 +6883,8 @@ const reviewTermBaseLanguageLabels = {
   Korean: "韩语",
   Spanish: "西班牙语",
   Portuguese: "葡萄牙语",
+  Portuguese_Brazil: "葡萄牙语（巴西）",
+  Portuguese_Portugal: "葡萄牙语（葡萄牙）",
   Russian: "俄语",
   Arabic: "阿拉伯语",
   Thai: "泰语",

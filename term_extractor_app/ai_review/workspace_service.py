@@ -624,6 +624,7 @@ def _apply_natural_language_adjustment(
     )
 
     language_labels = [
+        "葡萄牙语（巴西）", "葡萄牙语（葡萄牙）", "巴葡", "欧葡",
         "简体中文", "繁体中文", "英语", "英文", "日语", "韩语", "法语", "德语", "西班牙语",
         "葡萄牙语", "意大利语", "俄语", "阿拉伯语", "泰语", "越南语", "印尼语", "土耳其语",
         "波兰语", "荷兰语", "瑞典语", "挪威语", "丹麦语", "芬兰语", "捷克语", "匈牙利语",
@@ -633,7 +634,14 @@ def _apply_natural_language_adjustment(
     for label in language_labels:
         column = _find_adjustment_column(adjustment, (label,))
         if column is not None:
-            language = "英语" if label == "英文" else label
+            language = {"英文": "英语", "巴葡": "葡萄牙语（巴西）", "欧葡": "葡萄牙语（葡萄牙）"}.get(label, label)
+            if language == "葡萄牙语" and any(
+                target in {"葡萄牙语（巴西）", "葡萄牙语（葡萄牙）"} and mapped_column == column
+                for target, mapped_column in target_columns
+            ):
+                continue
+            if (language, column) in target_columns:
+                continue
             target_columns.append((language, column))
     if not target_columns:
         generic_target = _find_adjustment_column(adjustment, ("译文", "目标文本", "target"))
@@ -1231,6 +1239,9 @@ def _header_role(label: str) -> str:
 def _language_from_label(label: str) -> str:
     normalized = str(label or "").lower()
     mappings = {
+        "葡萄牙语（巴西）": ("por-br", "por_br", "pt-br", "pt_br", "portuguese (brazil)", "portuguese_brazil", "葡萄牙语（巴西）", "巴葡"),
+        "葡萄牙语（葡萄牙）": ("por-pt", "por_pt", "pt-pt", "pt_pt", "portuguese (portugal)", "portuguese_portugal", "葡萄牙语（葡萄牙）", "欧葡"),
+        "葡萄牙语": ("portuguese", "葡萄牙语"),
         "简体中文": ("zh-cn", "zh_cn", "zh-hans", "简中", "简体"),
         "繁体中文": ("zh-tw", "zh_tw", "zh-hant", "繁中", "繁体"),
         "英语": ("english", "en-us", "en_us", "en-gb", "en_gb", "英语", "英文"),

@@ -58,6 +58,28 @@ def _exported_term_table_with_stale_dimension() -> bytes:
 
 
 class ReviewTermBaseTests(unittest.TestCase):
+    def test_portuguese_variants_keep_termbase_and_memoq_languages_separate(self) -> None:
+        from term_extractor_app.ai_review.memoq_service import _language_code
+        from term_extractor_app.ai_review.workspace_service import _language_from_label
+
+        available = ["Portuguese", "Portuguese_Brazil", "Portuguese_Portugal"]
+        for label, code, column in [
+            ("葡萄牙语（巴西）", "por-BR", "Portuguese_Brazil"),
+            ("葡萄牙语（葡萄牙）", "por-PT", "Portuguese_Portugal"),
+        ]:
+            with self.subTest(language=label):
+                self.assertEqual(_language_code(label), code)
+                self.assertEqual(_language_code(code.replace("por", "pt")), code)
+                self.assertEqual(_language_from_label(code), label)
+                self.assertEqual(term_base_service.resolve_term_table_language(label, available), column)
+                self.assertEqual(term_base_service.resolve_term_table_language(code, available), column)
+                self.assertEqual(term_base_service.resolve_term_table_language(label, [code]), code)
+                self.assertEqual(term_base_service.resolve_term_table_language(label, ["Portuguese"]), "")
+                other = "Portuguese_Portugal" if column == "Portuguese_Brazil" else "Portuguese_Brazil"
+                self.assertEqual(term_base_service.resolve_term_table_language(label, [other]), "")
+        self.assertEqual(_language_code("葡萄牙语"), "por")
+        self.assertEqual(term_base_service.resolve_term_table_language("葡萄牙语", available), "Portuguese")
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         root = Path(self.temp.name)
