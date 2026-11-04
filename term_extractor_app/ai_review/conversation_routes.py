@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from .session_store import (
-    add_attachment,
+    add_attachment_stream,
     add_message,
     answer_question,
     create_session,
@@ -26,7 +26,7 @@ from .session_store import (
     update_session,
     update_attachment,
 )
-from .excel_mapping_service import get_excel_mapping_preset
+from .excel_mapping_service import get_excel_mapping_preset, _normalize_mapping
 from .readers import ReaderError, build_default_registry
 from .workflow_service import get_session_task_results, start_session_review
 from .workspace_service import submit_workspace_inspection
@@ -204,6 +204,7 @@ class SessionUpdatePayload(BaseModel):
 class AttachmentMappingPayload(BaseModel):
     mode: str = "ai"
     preset_id: str | None = None
+    mapping: dict[str, Any] | None = None
 
 
 class LocalAttachmentPayload(BaseModel):
@@ -307,7 +308,7 @@ def remove_conversation(session_id: str, payload: SessionDeletePayload) -> dict[
 
 
 @router.post("/{session_id}/attachments")
-async def upload_attachments(session_id: str, files: list[UploadFile] = File(...)) -> dict[str, Any]:
+def upload_attachments(session_id: str, files: list[UploadFile] = File(...)) -> dict[str, Any]:
     if not get_session(session_id):
         raise HTTPException(status_code=404, detail="审校会话不存在")
     if not files:
@@ -316,12 +317,13 @@ async def upload_attachments(session_id: str, files: list[UploadFile] = File(...
         raise HTTPException(status_code=400, detail="一次最多上传 50 个文件")
     result = []
     for file in files:
-        data = await file.read()
         try:
-            result.append(add_attachment(session_id, file.filename or "unknown", data))
+            result.append(add_attachment_stream(session_id, file.filename or "unknown", file.file))
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=f"保存文件失败：{exc}") from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"attachments": result}
+    return {"attachments": result, "session": get_session(session_id)}
 
 
 @router.post("/{session_id}/attachments/local")
@@ -332,16 +334,13 @@ def attach_local_file(session_id: str, payload: LocalAttachmentPayload) -> dict[
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="找不到原始文件，无法添加。")
     try:
-        attachment = add_attachment(
-            session_id,
-            path.name,
-            path.read_bytes(),
-        )
+        with path.open("rb") as source:
+            attachment = add_attachment_stream(session_id, path.name, source)
     except OSError as exc:
         raise HTTPException(status_code=400, detail=f"读取原始文件失败：{exc}") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"attachment": attachment}
+    return {"attachment": attachment, "session": get_session(session_id)}
 
 
 @router.patch("/{session_id}/attachments/{attachment_id}")
@@ -357,11 +356,17 @@ def configure_attachment_mapping(
     if mode not in {"ai", "preset"}:
         raise HTTPException(status_code=400, detail="导入方式无效")
     preset_id = None
+    manifest = dict(attachment.get("manifest") or {})
+    manifest.pop("manual_mapping", None)
     if mode == "preset":
         if attachment["original_filename"].lower().endswith((".xlsx", ".xlsm")) is False:
             raise HTTPException(status_code=400, detail="映射模板仅适用于 Excel 文件")
         try:
-            preset = get_excel_mapping_preset(str(payload.preset_id or ""))
+            if payload.mapping is not None:
+                manifest["manual_mapping"] = _normalize_mapping(payload.mapping)
+                preset = {"id": None}
+            else:
+                preset = get_excel_mapping_preset(str(payload.preset_id or ""))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         preset_id = preset["id"]
@@ -369,6 +374,7 @@ def configure_attachment_mapping(
         attachment_id,
         mapping_mode=mode,
         mapping_preset_id=preset_id,
+        manifest_json=manifest,
     )
     return {"ok": True, "attachment": updated}
 
@@ -393,6 +399,8 @@ def inspect_attachment_structure(session_id: str, attachment_id: str) -> dict[st
     except ReaderError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     manifest = document.to_manifest()
+    if (attachment.get("manifest") or {}).get("manual_mapping"):
+        manifest["manual_mapping"] = attachment["manifest"]["manual_mapping"]
     updated = update_attachment(
         attachment_id,
         file_type=document.file_type,

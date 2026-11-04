@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 from .config import UPLOADS_DIR, ensure_directories
 from .database import dumps_json, get_connection, loads_json, utc_now
@@ -17,6 +18,26 @@ def save_upload_file(filename: str, data: bytes) -> Path:
     path = UPLOADS_DIR / stored_name
     path.write_bytes(data)
     return path
+
+
+def save_upload_stream(filename: str, stream: BinaryIO) -> tuple[Path, str, int]:
+    """Copy/hash in bounded chunks; failed or empty copies never leave private files."""
+    ensure_directories()
+    path = UPLOADS_DIR / f"{uuid.uuid4().hex}{Path(filename).suffix.lower()}"
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        with path.open("wb") as output:
+            while chunk := stream.read(1024 * 1024):
+                output.write(chunk)
+                digest.update(chunk)
+                size += len(chunk)
+        if not size:
+            raise ValueError("上传文件为空")
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+    return path, digest.hexdigest(), size
 
 
 def create_batch(

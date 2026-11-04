@@ -112,8 +112,6 @@ def _normalize_mapping(mapping: dict[str, Any]) -> dict[str, Any]:
                 raise ValueError(f"第 {sheet_index} 个工作表存在未完成的原文或译文列配置")
             if source_column == target_column:
                 raise ValueError(f"第 {sheet_index} 个工作表的原文列和译文列不能相同")
-            if source_column in source_columns:
-                raise ValueError(f"第 {sheet_index} 个工作表的原文列不能重复")
             if target_column in target_columns:
                 raise ValueError(f"第 {sheet_index} 个工作表的译文列不能重复")
 
@@ -123,6 +121,8 @@ def _normalize_mapping(mapping: dict[str, Any]) -> dict[str, Any]:
                     "source_column": source_column,
                     "target_column": target_column,
                     "info_columns": info_columns,
+                    "source_language": str(item.get("source_language") or mapping.get("source_language") or "auto").strip(),
+                    "target_language": str(item.get("target_language") or mapping.get("target_language") or "auto").strip(),
                 }
             )
             source_columns.add(source_column)

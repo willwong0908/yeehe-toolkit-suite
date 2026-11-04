@@ -92,6 +92,98 @@ class ConversationApiTests(unittest.TestCase):
             item.stop()
         self.temp.cleanup()
 
+    def test_stream_attachment_uses_bounded_reads_and_preserves_exact_bytes(self) -> None:
+        import hashlib
+        sid = session_store.create_session()["id"]
+        content = (b"source,target\n" * 400000) + b"last-row"
+        class BoundedStream(BytesIO):
+            def read(self, size=-1):
+                self_test.assertGreater(size, 0)
+                self_test.assertLessEqual(size, 1024 * 1024)
+                return super().read(size)
+        self_test = self
+        attachment = session_store.add_attachment_stream(sid, "large.csv", BoundedStream(content))
+        self.assertEqual(attachment["size_bytes"], len(content))
+        self.assertEqual(attachment["file_hash"], hashlib.sha256(content).hexdigest())
+        self.assertEqual(Path(attachment["stored_path"]).read_bytes(), content)
+        self.assertEqual(attachment["status"], "uploaded")
+        self.assertEqual(session_store.get_session(sid)["title"], "large.csv")
+
+    def test_failed_stream_does_not_leave_partial_file_or_attachment(self) -> None:
+        sid = session_store.create_session()["id"]
+        class BrokenStream:
+            calls = 0
+            def read(self, size):
+                self.calls += 1
+                if self.calls == 1:
+                    return b"partial-data"
+                raise OSError("simulated copy failure")
+        for stream, error in [(BrokenStream(), OSError), (BytesIO(), ValueError)]:
+            with self.assertRaises(error):
+                session_store.add_attachment_stream(sid, "broken.xlsx", stream)
+            self.assertFalse(list(self.uploads.iterdir()))
+            self.assertEqual(session_store.get_pending_attachments(sid), [])
+
+    def test_slow_upload_does_not_block_other_requests_or_parse_document(self) -> None:
+        import asyncio
+        import httpx
+        from term_extractor_app.ai_review import conversation_routes
+        sid = session_store.create_session()["id"]
+        entered, release = threading.Event(), threading.Event()
+        original = session_store.add_attachment_stream
+        def slow_copy(*args):
+            entered.set()
+            if not release.wait(3):
+                raise RuntimeError("Upload held the request loop")
+            return original(*args)
+        app = FastAPI(); app.include_router(router)
+        async def verify():
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                upload = asyncio.create_task(client.post(f"/api/ai-review/conversations/{sid}/attachments", files={"files": ("large.csv", b"source,target\na,b")}))
+                try:
+                    self.assertTrue(await asyncio.to_thread(entered.wait, 1))
+                    response = await asyncio.wait_for(client.get(f"/api/ai-review/conversations/{sid}"), timeout=.8)
+                    self.assertEqual(response.status_code, 200)
+                finally:
+                    release.set()
+                    completed = await upload
+                self.assertEqual(completed.status_code, 200, completed.text)
+                self.assertEqual(completed.json()["attachments"][0]["status"], "uploaded")
+        with patch.object(conversation_routes, "add_attachment_stream", side_effect=slow_copy), patch.object(conversation_routes, "build_default_registry", side_effect=AssertionError("Upload must not parse workbook")):
+            asyncio.run(verify())
+
+    def test_inline_mapping_preserves_multiple_targets_and_column_languages(self) -> None:
+        sid = self.client.post("/api/ai-review/conversations", json={"source_language": "日语", "target_languages": ["日语"]}).json()["session"]["id"]
+        workbook = Workbook(); sheet = workbook.active
+        sheet.append(["中文", "English", "Portuguese_Brazil", "Custom", "备注"])
+        sheet.append(["你好", "Hello", "Olá", "Salut", "问候"])
+        buffer = BytesIO(); workbook.save(buffer); workbook.close()
+        response = self.client.post(f"/api/ai-review/conversations/{sid}/attachments", files={"files": ("multi.xlsx", buffer.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+        aid = response.json()["attachments"][0]["id"]
+        mapping = {"sheets": [{"sheet_name": "Sheet", "mappings": [
+            {"source_column": 0, "target_column": 1, "source_language": "简体中文", "target_language": "英语", "info_columns": [{"column": 4, "category": "背景"}]},
+            {"source_column": 0, "target_column": 2, "source_language": "简体中文", "target_language": "葡萄牙语（巴西）"},
+            {"source_column": 1, "target_column": 3, "source_language": "英语", "target_language": "自定义语种"},
+        ]}]}
+        route = f"/api/ai-review/conversations/{sid}/attachments/{aid}"
+        configured = self.client.patch(route, json={"mode": "preset", "mapping": mapping})
+        self.assertEqual(configured.status_code, 200, configured.text)
+        for _ in range(2):
+            structure = self.client.get(route + "/structure").json()
+            self.assertEqual(len(structure["attachment"]["manifest"]["manual_mapping"]["sheets"][0]["mappings"]), 3)
+        with patch.object(workspace_service, "workspace_chat", side_effect=AssertionError("Manual mapping must not invoke AI")):
+            plan = workspace_service.inspect_workspace_sync(sid)
+        targets = {target["language"]: target["units"] for target in plan["targets"]}
+        self.assertEqual(set(targets), {"英语", "葡萄牙语（巴西）", "自定义语种"})
+        self.assertEqual(targets["英语"][0]["source_text"], "你好")
+        self.assertEqual(targets["自定义语种"][0]["source_text"], "Hello")
+        self.assertEqual(targets["自定义语种"][0]["metadata"]["source_language"], "英语")
+        self.assertEqual(targets["英语"][0]["references"][0]["value"], "问候")
+        from term_extractor_app.ai_review.review_service import _build_request_payload
+        item = {"id": "test", "source_text": "Hello", "target_text": "Salut", "location": targets["自定义语种"][0]["metadata"]}
+        payload = _build_request_payload([item], {"source_language": "日语", "target_language": "日语"})
+        self.assertEqual(payload["items"][0]["language"], {"source": "英语", "target": "自定义语种"})
+
     def test_create_upload_inspect_and_delete_conversation(self) -> None:
         created = self.client.post(
             "/api/ai-review/conversations",

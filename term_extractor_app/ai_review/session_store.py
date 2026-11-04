@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import hashlib
+import io
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
-from .cache_service import save_upload_file
+from .cache_service import save_upload_stream
 from .config import UPLOADS_DIR
 from .database import dumps_json, get_connection, init_db, loads_json, utc_now
 
@@ -403,50 +403,38 @@ def _remove_orphaned_private_uploads() -> None:
             continue
 
 
-def add_attachment(
-    session_id: str,
-    filename: str,
-    data: bytes,
-) -> dict[str, Any]:
-    session = get_session(session_id)
-    if not session:
+def add_attachment(session_id: str, filename: str, data: bytes) -> dict[str, Any]:
+    return add_attachment_stream(session_id, filename, io.BytesIO(data))
+
+
+def add_attachment_stream(session_id: str, filename: str, stream: BinaryIO) -> dict[str, Any]:
+    """Register an upload without parsing its contents or allocating its full size."""
+    if not get_session(session_id):
         raise ValueError("审校会话不存在")
-    if not data:
-        raise ValueError("上传文件为空")
-    stored_path = save_upload_file(filename, data)
+    stored_path, digest, size = save_upload_stream(filename, stream)
     attachment_id = uuid.uuid4().hex
     now = utc_now()
-    digest = hashlib.sha256(data).hexdigest()
-    with get_connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO review_attachments (
-                id, session_id, original_filename, stored_path, file_hash,
-                size_bytes, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, 'uploaded', ?, ?)
-            """,
-            (
-                attachment_id,
-                session_id,
-                filename,
-                str(stored_path),
-                digest,
-                len(data),
-                now,
-                now,
-            ),
-        )
-    update_session(session_id, status="draft")
-    if not session.get("title_custom"):
+    try:
         with get_connection() as conn:
-            attachment_count = int(
-                conn.execute(
-                    "SELECT COUNT(*) FROM review_attachments WHERE session_id = ?",
-                    (session_id,),
-                ).fetchone()[0]
+            # The session may have been removed while a large file was copied.
+            session = conn.execute("SELECT title_custom FROM review_sessions WHERE id = ?", (session_id,)).fetchone()
+            if session is None:
+                raise ValueError("审校会话不存在")
+            conn.execute(
+                """INSERT INTO review_attachments (
+                    id, session_id, original_filename, stored_path, file_hash,
+                    size_bytes, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 'uploaded', ?, ?)""",
+                (attachment_id, session_id, filename, str(stored_path), digest, size, now, now),
             )
-        if attachment_count == 1:
-            update_session(session_id, title=Path(filename).name[:120] or "新审校")
+            conn.execute("UPDATE review_sessions SET status = 'draft', updated_at = ? WHERE id = ?", (now, session_id))
+            if not session["title_custom"]:
+                count = conn.execute("SELECT COUNT(*) FROM review_attachments WHERE session_id = ?", (session_id,)).fetchone()[0]
+                if count == 1:
+                    conn.execute("UPDATE review_sessions SET title = ? WHERE id = ?", (Path(filename).name[:120] or "新审校", session_id))
+    except BaseException:
+        stored_path.unlink(missing_ok=True)
+        raise
     attachment = get_attachment(attachment_id) or {}
     emit_event(session_id, "attachment.uploaded", {"attachment": _public_attachment(attachment)})
     return attachment

@@ -603,21 +603,21 @@ def _run_review_task_impl(task_id: str) -> None:
         memoq_ids = [str(x) for x in (config.get("memoq_term_base_ids") or []) if str(x).strip()]
         if memoq_ids:
             try:
-                pairs, remote_revision = lookup_terms_snapshot(
-                    memoq_ids,
-                    str(config.get("source_language") or "auto"),
-                    str(config.get("target_language") or "auto"),
-                    [str(item.get("source_text") or "") for item in items if str(item.get("source_text") or "").strip()],
-                )
-                config['memoq_revision'] = remote_revision
-                unique: list[dict[str, Any]] = []
-                seen: set[str] = set()
-                for pair in pairs:
-                    key = _term_pair_key(pair)
-                    if key not in seen:
-                        seen.add(key)
-                        unique.append(pair)
-                config["memoq_term_pairs"] = unique
+                groups = {}
+                for item in items:
+                    pair = (_item_language(item, config, "source"), _item_language(item, config, "target"))
+                    groups.setdefault(pair, []).append(item)
+                revisions, unique = [], []
+                for (source_lang, target_lang), group in groups.items():
+                    pairs, revision = lookup_terms_snapshot(memoq_ids, source_lang, target_lang,
+                        [str(item.get("source_text") or "") for item in group if str(item.get("source_text") or "").strip()])
+                    revisions.append((source_lang, target_lang, revision))
+                    unique.extend(pairs)
+                    for item in group:
+                        text = str(item.get("source_text") or "").casefold()
+                        item["term_pairs"] = [pair for pair in pairs if str(pair.get("source") or "").casefold() in text]
+                config['memoq_revision'] = dumps_json(sorted(revisions))
+
                 _add_log(task_id, "info", f"memoQ 术语库已匹配 {len(unique)} 个术语对，将按批次提供给模型。")
             except MemoQError as exc:
                 config['term_lookup_failed'] = True
@@ -629,12 +629,12 @@ def _run_review_task_impl(task_id: str) -> None:
             for item in items:
                 term_pairs, match_meta = match_terms(
                     term_base_id,
-                    str(config.get("source_language") or ""),
-                    str(config.get("target_language") or ""),
+                    _item_language(item, config, "source"),
+                    _item_language(item, config, "target"),
                     str(item.get("source_text") or ""),
                 )
                 if term_pairs:
-                    item["term_pairs"] = term_pairs
+                    item["term_pairs"] = [*(item.get("term_pairs") or []), *term_pairs]
                     term_match_count += len(term_pairs)
                 if match_meta.get("status") == "language_unmapped":
                     term_language_warning = match_meta
@@ -676,7 +676,7 @@ def _run_review_task_impl(task_id: str) -> None:
                 _item_info(item),
                 _build_request_payload([item], config).get('term_pairs', []),
                 model,
-                prompt_signature,
+                prompt_signature + dumps_json({"source": _item_language(item, config, "source"), "target": _item_language(item, config, "target")}),
                 directional_signature,
                 enable_thinking,
             )
@@ -1358,7 +1358,9 @@ def _item_info(item: dict[str, Any]) -> list[dict[str, str]]:
 def _build_request_payload(
     package: list[dict[str, Any]], config: dict[str, Any]
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {"items": [_payload_item(item) for item in package]}
+    payload: dict[str, Any] = {"items": [_payload_item(item) for item in package], "language_instruction": "每条 items.language 为该条实际原文和译文语种，优先于包级 language；auto 表示根据该条文本判断。"}
+    for entry, item in zip(payload["items"], package):
+        entry["language"] = {"source": _item_language(item, config, "source"), "target": _item_language(item, config, "target")}
     term_pairs = _package_term_pairs(package)
     term_keys = {_term_pair_key(pair) for pair in term_pairs}
     sources = [str(item.get('source_text') or '').casefold() for item in package]
@@ -1379,6 +1381,11 @@ def _build_request_payload(
     if source_language or target_language:
         payload["language"] = {"source": source_language, "target": target_language}
     return payload
+
+
+def _item_language(item: dict[str, Any], config: dict[str, Any], side: str) -> str:
+    location = item.get("location") or loads_json(item.get("location_json"), {})
+    return str(location.get(side + "_language") or config.get(side + "_language") or "auto")
 
 
 def _payload_item(item: dict[str, Any]) -> dict[str, Any]:

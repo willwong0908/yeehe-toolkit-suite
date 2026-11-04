@@ -1,0 +1,960 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-04T15:18:51.806Z",
+  "title": "Design System: 译禾工具合集 · 中性工作台",
+  "extensions": {
+    "sourceFiles": [
+      "term_extractor_app/workspace_ui.py",
+      "term_extractor_app/workspace_layout.py",
+      "term_extractor_app/web_app.py"
+    ],
+    "authority": "workspace_ui.py is the sole palette and component-role source. workspace_layout.py owns all-page/dialog layouts and references semantic tokens. APP_CSS appends THEME_CSS after LAYOUT_CSS. No independent legacy palette.",
+    "colorMeta": {
+      "bg": {
+        "role": "neutral",
+        "displayName": "bg",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "panel",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "panel-soft": {
+        "role": "neutral",
+        "displayName": "panel-soft",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "sidebar-bg": {
+        "role": "neutral",
+        "displayName": "sidebar-bg",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "ink",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "muted",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "line",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "line-strong": {
+        "role": "neutral",
+        "displayName": "line-strong",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "primary": {
+        "role": "primary",
+        "displayName": "primary",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "primary-strong": {
+        "role": "primary",
+        "displayName": "primary-strong",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "button-ink": {
+        "role": "neutral",
+        "displayName": "button-ink",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "selected-bg": {
+        "role": "neutral",
+        "displayName": "selected-bg",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "selected-border": {
+        "role": "neutral",
+        "displayName": "selected-border",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "danger": {
+        "role": "functional",
+        "displayName": "danger",
+        "tonalRamp": [
+          "oklch(15% 0.09622 24.20)",
+          "oklch(26.43% 0.09622 24.20)",
+          "oklch(37.86% 0.09622 24.20)",
+          "oklch(49.29% 0.09622 24.20)",
+          "oklch(60.71% 0.09622 24.20)",
+          "oklch(72.14% 0.09622 24.20)",
+          "oklch(83.57% 0.09622 24.20)",
+          "oklch(95% 0.09622 24.20)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "danger-bg": {
+        "role": "functional",
+        "displayName": "danger-bg",
+        "tonalRamp": [
+          "oklch(15% 0.02273 22.93)",
+          "oklch(26.43% 0.02273 22.93)",
+          "oklch(37.86% 0.02273 22.93)",
+          "oklch(49.29% 0.02273 22.93)",
+          "oklch(60.71% 0.02273 22.93)",
+          "oklch(72.14% 0.02273 22.93)",
+          "oklch(83.57% 0.02273 22.93)",
+          "oklch(95% 0.02273 22.93)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "danger-line": {
+        "role": "functional",
+        "displayName": "danger-line",
+        "tonalRamp": [
+          "oklch(15% 0.05319 24.15)",
+          "oklch(26.43% 0.05319 24.15)",
+          "oklch(37.86% 0.05319 24.15)",
+          "oklch(49.29% 0.05319 24.15)",
+          "oklch(60.71% 0.05319 24.15)",
+          "oklch(72.14% 0.05319 24.15)",
+          "oklch(83.57% 0.05319 24.15)",
+          "oklch(95% 0.05319 24.15)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "success": {
+        "role": "functional",
+        "displayName": "success",
+        "tonalRamp": [
+          "oklch(15% 0.06979 156.92)",
+          "oklch(26.43% 0.06979 156.92)",
+          "oklch(37.86% 0.06979 156.92)",
+          "oklch(49.29% 0.06979 156.92)",
+          "oklch(60.71% 0.06979 156.92)",
+          "oklch(72.14% 0.06979 156.92)",
+          "oklch(83.57% 0.06979 156.92)",
+          "oklch(95% 0.06979 156.92)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "success-bg": {
+        "role": "functional",
+        "displayName": "success-bg",
+        "tonalRamp": [
+          "oklch(15% 0.02763 156.99)",
+          "oklch(26.43% 0.02763 156.99)",
+          "oklch(37.86% 0.02763 156.99)",
+          "oklch(49.29% 0.02763 156.99)",
+          "oklch(60.71% 0.02763 156.99)",
+          "oklch(72.14% 0.02763 156.99)",
+          "oklch(83.57% 0.02763 156.99)",
+          "oklch(95% 0.02763 156.99)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "success-line": {
+        "role": "functional",
+        "displayName": "success-line",
+        "tonalRamp": [
+          "oklch(15% 0.05875 154.95)",
+          "oklch(26.43% 0.05875 154.95)",
+          "oklch(37.86% 0.05875 154.95)",
+          "oklch(49.29% 0.05875 154.95)",
+          "oklch(60.71% 0.05875 154.95)",
+          "oklch(72.14% 0.05875 154.95)",
+          "oklch(83.57% 0.05875 154.95)",
+          "oklch(95% 0.05875 154.95)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "warning": {
+        "role": "functional",
+        "displayName": "warning",
+        "tonalRamp": [
+          "oklch(15% 0.07998 85.36)",
+          "oklch(26.43% 0.07998 85.36)",
+          "oklch(37.86% 0.07998 85.36)",
+          "oklch(49.29% 0.07998 85.36)",
+          "oklch(60.71% 0.07998 85.36)",
+          "oklch(72.14% 0.07998 85.36)",
+          "oklch(83.57% 0.07998 85.36)",
+          "oklch(95% 0.07998 85.36)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "warning-bg": {
+        "role": "functional",
+        "displayName": "warning-bg",
+        "tonalRamp": [
+          "oklch(15% 0.02404 82.82)",
+          "oklch(26.43% 0.02404 82.82)",
+          "oklch(37.86% 0.02404 82.82)",
+          "oklch(49.29% 0.02404 82.82)",
+          "oklch(60.71% 0.02404 82.82)",
+          "oklch(72.14% 0.02404 82.82)",
+          "oklch(83.57% 0.02404 82.82)",
+          "oklch(95% 0.02404 82.82)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "warning-line": {
+        "role": "functional",
+        "displayName": "warning-line",
+        "tonalRamp": [
+          "oklch(15% 0.05602 82.15)",
+          "oklch(26.43% 0.05602 82.15)",
+          "oklch(37.86% 0.05602 82.15)",
+          "oklch(49.29% 0.05602 82.15)",
+          "oklch(60.71% 0.05602 82.15)",
+          "oklch(72.14% 0.05602 82.15)",
+          "oklch(83.57% 0.05602 82.15)",
+          "oklch(95% 0.05602 82.15)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "focus": {
+        "role": "functional",
+        "displayName": "focus",
+        "tonalRamp": [
+          "oklch(15% 0.08186 245.91)",
+          "oklch(26.43% 0.08186 245.91)",
+          "oklch(37.86% 0.08186 245.91)",
+          "oklch(49.29% 0.08186 245.91)",
+          "oklch(60.71% 0.08186 245.91)",
+          "oklch(72.14% 0.08186 245.91)",
+          "oklch(83.57% 0.08186 245.91)",
+          "oklch(95% 0.08186 245.91)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "selection": {
+        "role": "functional",
+        "displayName": "selection",
+        "tonalRamp": [
+          "oklch(15% 0.04740 243.45)",
+          "oklch(26.43% 0.04740 243.45)",
+          "oklch(37.86% 0.04740 243.45)",
+          "oklch(49.29% 0.04740 243.45)",
+          "oklch(60.71% 0.04740 243.45)",
+          "oklch(72.14% 0.04740 243.45)",
+          "oklch(83.57% 0.04740 243.45)",
+          "oklch(95% 0.04740 243.45)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "light-bg": {
+        "role": "neutral",
+        "displayName": "light-bg",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "light-panel": {
+        "role": "neutral",
+        "displayName": "light-panel",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "light-panel-soft": {
+        "role": "neutral",
+        "displayName": "light-panel-soft",
+        "tonalRamp": [
+          "oklch(15% 0.00132 106.42)",
+          "oklch(26.43% 0.00132 106.42)",
+          "oklch(37.86% 0.00132 106.42)",
+          "oklch(49.29% 0.00132 106.42)",
+          "oklch(60.71% 0.00132 106.42)",
+          "oklch(72.14% 0.00132 106.42)",
+          "oklch(83.57% 0.00132 106.42)",
+          "oklch(95% 0.00132 106.42)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "light-sidebar-bg": {
+        "role": "neutral",
+        "displayName": "light-sidebar-bg",
+        "tonalRamp": [
+          "oklch(15% 0.00132 106.42)",
+          "oklch(26.43% 0.00132 106.42)",
+          "oklch(37.86% 0.00132 106.42)",
+          "oklch(49.29% 0.00132 106.42)",
+          "oklch(60.71% 0.00132 106.42)",
+          "oklch(72.14% 0.00132 106.42)",
+          "oklch(83.57% 0.00132 106.42)",
+          "oklch(95% 0.00132 106.42)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "light-ink": {
+        "role": "neutral",
+        "displayName": "light-ink",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "light-muted": {
+        "role": "neutral",
+        "displayName": "light-muted",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "light-line": {
+        "role": "neutral",
+        "displayName": "light-line",
+        "tonalRamp": [
+          "oklch(15% 0.00404 106.48)",
+          "oklch(26.43% 0.00404 106.48)",
+          "oklch(37.86% 0.00404 106.48)",
+          "oklch(49.29% 0.00404 106.48)",
+          "oklch(60.71% 0.00404 106.48)",
+          "oklch(72.14% 0.00404 106.48)",
+          "oklch(83.57% 0.00404 106.48)",
+          "oklch(95% 0.00404 106.48)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "light-line-strong": {
+        "role": "neutral",
+        "displayName": "light-line-strong",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "light-primary": {
+        "role": "primary",
+        "displayName": "light-primary",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "light-primary-strong": {
+        "role": "primary",
+        "displayName": "light-primary-strong",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "light-button-ink": {
+        "role": "neutral",
+        "displayName": "light-button-ink",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "light-selected-bg": {
+        "role": "neutral",
+        "displayName": "light-selected-bg",
+        "tonalRamp": [
+          "oklch(15% 0.00288 84.56)",
+          "oklch(26.43% 0.00288 84.56)",
+          "oklch(37.86% 0.00288 84.56)",
+          "oklch(49.29% 0.00288 84.56)",
+          "oklch(60.71% 0.00288 84.56)",
+          "oklch(72.14% 0.00288 84.56)",
+          "oklch(83.57% 0.00288 84.56)",
+          "oklch(95% 0.00288 84.56)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "light-selected-border": {
+        "role": "neutral",
+        "displayName": "light-selected-border",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "light-danger": {
+        "role": "functional",
+        "displayName": "light-danger",
+        "tonalRamp": [
+          "oklch(15% 0.15619 27.13)",
+          "oklch(26.43% 0.15619 27.13)",
+          "oklch(37.86% 0.15619 27.13)",
+          "oklch(49.29% 0.15619 27.13)",
+          "oklch(60.71% 0.15619 27.13)",
+          "oklch(72.14% 0.15619 27.13)",
+          "oklch(83.57% 0.15619 27.13)",
+          "oklch(95% 0.15619 27.13)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "light-danger-bg": {
+        "role": "functional",
+        "displayName": "light-danger-bg",
+        "tonalRamp": [
+          "oklch(15% 0.01329 28.87)",
+          "oklch(26.43% 0.01329 28.87)",
+          "oklch(37.86% 0.01329 28.87)",
+          "oklch(49.29% 0.01329 28.87)",
+          "oklch(60.71% 0.01329 28.87)",
+          "oklch(72.14% 0.01329 28.87)",
+          "oklch(83.57% 0.01329 28.87)",
+          "oklch(95% 0.01329 28.87)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "light-danger-line": {
+        "role": "functional",
+        "displayName": "light-danger-line",
+        "tonalRamp": [
+          "oklch(15% 0.04431 23.41)",
+          "oklch(26.43% 0.04431 23.41)",
+          "oklch(37.86% 0.04431 23.41)",
+          "oklch(49.29% 0.04431 23.41)",
+          "oklch(60.71% 0.04431 23.41)",
+          "oklch(72.14% 0.04431 23.41)",
+          "oklch(83.57% 0.04431 23.41)",
+          "oklch(95% 0.04431 23.41)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "light-success": {
+        "role": "functional",
+        "displayName": "light-success",
+        "tonalRamp": [
+          "oklch(15% 0.08510 153.80)",
+          "oklch(26.43% 0.08510 153.80)",
+          "oklch(37.86% 0.08510 153.80)",
+          "oklch(49.29% 0.08510 153.80)",
+          "oklch(60.71% 0.08510 153.80)",
+          "oklch(72.14% 0.08510 153.80)",
+          "oklch(83.57% 0.08510 153.80)",
+          "oklch(95% 0.08510 153.80)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "light-success-bg": {
+        "role": "functional",
+        "displayName": "light-success-bg",
+        "tonalRamp": [
+          "oklch(15% 0.01158 153.67)",
+          "oklch(26.43% 0.01158 153.67)",
+          "oklch(37.86% 0.01158 153.67)",
+          "oklch(49.29% 0.01158 153.67)",
+          "oklch(60.71% 0.01158 153.67)",
+          "oklch(72.14% 0.01158 153.67)",
+          "oklch(83.57% 0.01158 153.67)",
+          "oklch(95% 0.01158 153.67)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "light-success-line": {
+        "role": "functional",
+        "displayName": "light-success-line",
+        "tonalRamp": [
+          "oklch(15% 0.03646 156.88)",
+          "oklch(26.43% 0.03646 156.88)",
+          "oklch(37.86% 0.03646 156.88)",
+          "oklch(49.29% 0.03646 156.88)",
+          "oklch(60.71% 0.03646 156.88)",
+          "oklch(72.14% 0.03646 156.88)",
+          "oklch(83.57% 0.03646 156.88)",
+          "oklch(95% 0.03646 156.88)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "light-warning": {
+        "role": "functional",
+        "displayName": "light-warning",
+        "tonalRamp": [
+          "oklch(15% 0.08886 76.12)",
+          "oklch(26.43% 0.08886 76.12)",
+          "oklch(37.86% 0.08886 76.12)",
+          "oklch(49.29% 0.08886 76.12)",
+          "oklch(60.71% 0.08886 76.12)",
+          "oklch(72.14% 0.08886 76.12)",
+          "oklch(83.57% 0.08886 76.12)",
+          "oklch(95% 0.08886 76.12)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "light-warning-bg": {
+        "role": "functional",
+        "displayName": "light-warning-bg",
+        "tonalRamp": [
+          "oklch(15% 0.01834 86.15)",
+          "oklch(26.43% 0.01834 86.15)",
+          "oklch(37.86% 0.01834 86.15)",
+          "oklch(49.29% 0.01834 86.15)",
+          "oklch(60.71% 0.01834 86.15)",
+          "oklch(72.14% 0.01834 86.15)",
+          "oklch(83.57% 0.01834 86.15)",
+          "oklch(95% 0.01834 86.15)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "light-warning-line": {
+        "role": "functional",
+        "displayName": "light-warning-line",
+        "tonalRamp": [
+          "oklch(15% 0.07130 90.33)",
+          "oklch(26.43% 0.07130 90.33)",
+          "oklch(37.86% 0.07130 90.33)",
+          "oklch(49.29% 0.07130 90.33)",
+          "oklch(60.71% 0.07130 90.33)",
+          "oklch(72.14% 0.07130 90.33)",
+          "oklch(83.57% 0.07130 90.33)",
+          "oklch(95% 0.07130 90.33)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "selection-ink": {
+        "role": "functional",
+        "displayName": "selection-ink",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      },
+      "backdrop": {
+        "role": "neutral",
+        "displayName": "backdrop",
+        "tonalRamp": [
+          "oklch(15% 0.00000 0.00)",
+          "oklch(26.43% 0.00000 0.00)",
+          "oklch(37.86% 0.00000 0.00)",
+          "oklch(49.29% 0.00000 0.00)",
+          "oklch(60.71% 0.00000 0.00)",
+          "oklch(72.14% 0.00000 0.00)",
+          "oklch(83.57% 0.00000 0.00)",
+          "oklch(95% 0.00000 0.00)"
+        ],
+        "tonalRampPurpose": "Synthesized preview only; not an implementation scale."
+      }
+    },
+    "themeMapping": {
+      "default": "dark",
+      "lightSelector": "html.light-theme",
+      "lightTokenPrefix": "light-",
+      "aliases": {
+        "text": "ink",
+        "surface-inset": "panel-soft",
+        "surface-raised": "panel",
+        "surface-hover": "selected-bg",
+        "panel-solid": "panel",
+        "panel-subtle": "panel-soft",
+        "primary-soft": "selected-bg",
+        "selected-line": "selected-border",
+        "accent": "ink",
+        "glass": "panel",
+        "glass-strong": "panel",
+        "glass-border": "line"
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "页面标题",
+        "purpose": "主页面标题"
+      },
+      "dialog-title": {
+        "displayName": "弹窗标题",
+        "purpose": "弹窗与附件映射标题"
+      },
+      "title": {
+        "displayName": "卡片标题",
+        "purpose": "卡片 h3"
+      },
+      "body": {
+        "displayName": "中文正文",
+        "purpose": "一般界面正文"
+      },
+      "chip": {
+        "displayName": "输入区工具文字",
+        "purpose": "语种与附件工具"
+      },
+      "stream": {
+        "displayName": "流式输出",
+        "purpose": "技术过程和输出文本"
+      },
+      "control": {
+        "displayName": "按钮与表单",
+        "purpose": "13px controls; medium-weight buttons."
+      },
+      "code": {
+        "displayName": "代码与正则",
+        "purpose": "Intentional \"Cascadia Mono\", Consolas, monospace in code/regex content; UI form controls retain font-ui override."
+      }
+    },
+    "shadows": [
+      {
+        "name": "overlay",
+        "value": "0 18px 50px #0004",
+        "purpose": "Shared dialog and language/term-base popover shadow; content surfaces have none."
+      }
+    ],
+    "motion": [
+      {
+        "name": "control-colors",
+        "value": "background-color .12s,border-color .12s",
+        "purpose": "No control movement or shadow animation"
+      },
+      {
+        "name": "reduced-motion",
+        "value": "@media(prefers-reduced-motion:reduce){animation:none!important;transition:none!important}",
+        "purpose": "Disable animation and transitions"
+      }
+    ],
+    "focus": {
+      "value": "2px solid var(--focus)",
+      "offset": "3px",
+      "selector": ":focus-visible",
+      "elements": [
+        "button",
+        "input",
+        "select",
+        "textarea",
+        "summary",
+        "a"
+      ]
+    },
+    "breakpoints": [
+      {
+        "name": "workspace-compact",
+        "value": "1100px"
+      },
+      {
+        "name": "workspace-stacked",
+        "value": "760px"
+      }
+    ],
+    "componentPreviewNotes": "Snippets use live project CSS variables with dark fallback values. They illustrate implemented controls; no application event handlers or backend behavior are simulated.",
+    "layoutSource": "workspace_layout.py retains local tool breakpoints; final theme owns shared responsive roles. Legacy literal radii and type sizes are not additional approved design tokens.",
+    "componentRoles": {
+      "defaultButton": "panel / ink / line",
+      "explicitPrimary": "primary / button-ink",
+      "clickableCard": "panel surface, panel-soft hover, never inverse fill",
+      "disabled": "muted / panel-soft / line; opacity .65",
+      "semanticStates": "danger, success and warning each own foreground/background/border triplets"
+    }
+  },
+  "components": [
+    {
+      "name": "主按钮",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "高反差主操作；保持静止的悬停效果。",
+      "html": "<button class=\"ds-primary\">确认语种</button>",
+      "css": ".ds-primary{font-family:\"Segoe UI\",\"Microsoft YaHei UI\",sans-serif;font-size:13px;font-weight:500;min-height:36px;padding:0 13px;border-radius:8px;cursor:pointer;transition:background-color .12s,border-color .12s;background:var(--primary,#ededed);color:var(--button-ink,#202020);border:1px solid var(--primary,#ededed)}.ds-primary:hover:not(:disabled){background:var(--primary-strong,#fff);border-color:var(--primary-strong,#fff)}.ds-primary:disabled{background:var(--panel-soft,#2c2c2c);color:var(--muted,#adadad);border-color:var(--line,#424242);opacity:.65;cursor:not-allowed}.ds-primary:focus-visible,.ds-secondary:focus-visible,.ds-input:focus-visible,.ds-nav:focus-visible,.ds-chip:focus-visible,.ds-composer textarea:focus-visible,.ds-language button:focus-visible{outline:2px solid var(--focus,#6393bd);outline-offset:3px}"
+    },
+    {
+      "name": "默认中性按钮",
+      "kind": "button",
+      "refersTo": "button-neutral",
+      "description": "普通按钮使用中性表面；仅明确主操作使用反差填色。",
+      "html": "<button class=\"ds-secondary\">取消</button>",
+      "css": ".ds-secondary{font-family:\"Segoe UI\",\"Microsoft YaHei UI\",sans-serif;font-size:13px;font-weight:500;min-height:36px;padding:0 13px;border-radius:8px;cursor:pointer;transition:background-color .12s,border-color .12s;background:var(--panel,#252525);color:var(--ink,#ededed);border:1px solid var(--line,#424242)}.ds-secondary:hover:not(:disabled){background:var(--selected-bg,#383838);border-color:var(--line-strong,#707070)}.ds-primary:focus-visible,.ds-secondary:focus-visible,.ds-input:focus-visible,.ds-nav:focus-visible,.ds-chip:focus-visible,.ds-composer textarea:focus-visible,.ds-language button:focus-visible{outline:2px solid var(--focus,#6393bd);outline-offset:3px}"
+    },
+    {
+      "name": "搜索输入",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "语种搜索或自定义名称输入。",
+      "html": "<input class=\"ds-input\" aria-label=\"搜索或输入自定义语种\" placeholder=\"搜索或输入自定义语种\">",
+      "css": ".ds-input{font:13px/1.5 \"Segoe UI\",\"Microsoft YaHei UI\",sans-serif;min-height:36px;padding:8px 10px;border:1px solid var(--line-strong,#707070);border-radius:8px;background:var(--panel,#252525);color:var(--ink,#ededed);caret-color:var(--ink,#ededed)}.ds-input::placeholder{color:var(--muted,#adadad);opacity:1}.ds-primary:focus-visible,.ds-secondary:focus-visible,.ds-input:focus-visible,.ds-nav:focus-visible,.ds-chip:focus-visible,.ds-composer textarea:focus-visible,.ds-language button:focus-visible{outline:2px solid var(--focus,#6393bd);outline-offset:3px}"
+    },
+    {
+      "name": "当前导航",
+      "kind": "nav",
+      "refersTo": "nav-selected",
+      "description": "中性色填充标明当前页。",
+      "html": "<nav aria-label=\"工具导航\"><button class=\"ds-nav\" aria-current=\"page\">AI 审校</button></nav>",
+      "css": ".ds-nav{font-family:\"Segoe UI\",\"Microsoft YaHei UI\",sans-serif;font-size:13px;font-weight:500;min-height:36px;padding:0 13px;border-radius:8px;cursor:pointer;transition:background-color .12s,border-color .12s;width:100%;padding:0 10px;text-align:left;font-weight:400;border:0;background:var(--selected-bg,#383838);color:var(--ink,#ededed)}.ds-nav:hover{background:var(--selected-bg,#383838)}.ds-primary:focus-visible,.ds-secondary:focus-visible,.ds-input:focus-visible,.ds-nav:focus-visible,.ds-chip:focus-visible,.ds-composer textarea:focus-visible,.ds-language button:focus-visible{outline:2px solid var(--focus,#6393bd);outline-offset:3px}"
+    },
+    {
+      "name": "语种工具",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "输入区内可换行的语种工具按钮。",
+      "html": "<button class=\"ds-chip\">译文 · 英语、日语</button>",
+      "css": ".ds-chip{font-family:\"Segoe UI\",\"Microsoft YaHei UI\",sans-serif;font-size:13px;font-weight:500;min-height:36px;padding:0 13px;border-radius:8px;cursor:pointer;transition:background-color .12s,border-color .12s;font-size:12px;padding:7px 10px;max-width:100%;overflow-wrap:anywhere;white-space:normal;background:var(--panel,#252525);color:var(--ink,#ededed);border:1px solid var(--line,#424242)}.ds-chip:hover{background:var(--selected-bg,#383838);border-color:var(--line-strong,#707070)}.ds-primary:focus-visible,.ds-secondary:focus-visible,.ds-input:focus-visible,.ds-nav:focus-visible,.ds-chip:focus-visible,.ds-composer textarea:focus-visible,.ds-language button:focus-visible{outline:2px solid var(--focus,#6393bd);outline-offset:3px}"
+    },
+    {
+      "name": "内容卡片",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "平面内容容器，使用边线与标题建立层次。",
+      "html": "<section class=\"ds-card\"><h3>审校设置</h3><p>配置本次任务使用的选项。</p></section>",
+      "css": ".ds-card{font:14px/1.5 \"Segoe UI\",\"Microsoft YaHei UI\",sans-serif;padding:22px;border:1px solid var(--line,#424242);border-radius:12px;background:var(--panel,#252525);color:var(--ink,#ededed)}.ds-card h3{font-size:17px;font-weight:600;margin:0 0 18px}.ds-card p{font-size:13px;color:var(--muted,#adadad);margin:0}"
+    },
+    {
+      "name": "对话输入区",
+      "kind": "custom",
+      "refersTo": "composer",
+      "description": "正文对齐的圆角输入区，内部文本区不增加边框。",
+      "html": "<div class=\"ds-composer\"><textarea aria-label=\"审校要求\" placeholder=\"输入审校要求\"></textarea><button class=\"ds-chip\">原文 · 自动检测</button></div>",
+      "css": ".ds-composer{font:14px/1.5 \"Segoe UI\",\"Microsoft YaHei UI\",sans-serif;padding:14px;background:var(--panel,#252525);color:var(--ink,#ededed);border:1px solid var(--line-strong,#707070);border-radius:14px}.ds-composer textarea{font:inherit;min-height:64px;width:100%;resize:vertical;border:0;background:transparent;color:inherit}.ds-composer textarea::placeholder{color:var(--muted,#adadad)}.ds-chip{font-family:\"Segoe UI\",\"Microsoft YaHei UI\",sans-serif;font-size:13px;font-weight:500;min-height:36px;padding:0 13px;border-radius:8px;cursor:pointer;transition:background-color .12s,border-color .12s;font-size:12px;padding:7px 10px;border:1px solid var(--line,#424242);background:var(--panel,#252525);color:var(--ink,#ededed)}.ds-chip:hover{background:var(--selected-bg,#383838);border-color:var(--line-strong,#707070)}.ds-primary:focus-visible,.ds-secondary:focus-visible,.ds-input:focus-visible,.ds-nav:focus-visible,.ds-chip:focus-visible,.ds-composer textarea:focus-visible,.ds-language button:focus-visible{outline:2px solid var(--focus,#6393bd);outline-offset:3px}"
+    },
+    {
+      "name": "单列语种选择",
+      "kind": "custom",
+      "refersTo": "dialog",
+      "description": "候选两列排列，选中语种带勾号；自定义项跨整行。",
+      "html": "<section class=\"ds-language\" aria-label=\"B 列 · 译文语种\"><h2>B 列 · 译文语种</h2><div class=\"ds-language-options\"><button aria-pressed=\"true\">英语 ✓</button><button aria-pressed=\"false\">日语</button><button class=\"ds-custom-language\">使用自定义语种“繁体中文（香港）”</button></div><p aria-live=\"polite\">已选：英语</p></section>",
+      "css": ".ds-language{font:14px/1.5 \"Segoe UI\",\"Microsoft YaHei UI\",sans-serif;background:var(--panel,#252525);color:var(--ink,#ededed);padding:22px;border-radius:14px;box-shadow:var(--shadow,0 18px 50px #0004)}.ds-language h2{margin:0 0 16px;font-size:21px;font-weight:600}.ds-language-options{display:grid;grid-template-columns:1fr 1fr;gap:6px;max-height:300px;overflow:auto}.ds-language button{font-family:\"Segoe UI\",\"Microsoft YaHei UI\",sans-serif;font-size:13px;font-weight:500;min-height:36px;padding:0 13px;border-radius:8px;cursor:pointer;transition:background-color .12s,border-color .12s;text-align:left;color:var(--ink,#ededed);background:var(--panel,#252525);border:1px solid var(--line,#424242)}.ds-language button:hover{background:var(--selected-bg,#383838);border-color:var(--line-strong,#707070)}.ds-custom-language{grid-column:1/-1;white-space:normal;overflow-wrap:anywhere}.ds-language p{color:var(--muted,#adadad)}.ds-primary:focus-visible,.ds-secondary:focus-visible,.ds-input:focus-visible,.ds-nav:focus-visible,.ds-chip:focus-visible,.ds-composer textarea:focus-visible,.ds-language button:focus-visible{outline:2px solid var(--focus,#6393bd);outline-offset:3px}.ds-language button[aria-pressed=true]{background:var(--selected-bg,#383838);border-color:var(--selected-border,#888);color:var(--ink,#ededed)}.ds-language{border:1px solid var(--line,#424242)}"
+    },
+    {
+      "name": "可点击工具卡片",
+      "kind": "card",
+      "refersTo": "clickable-card",
+      "description": "内容表面形式的工具入口，不能采用主按钮反差填色。",
+      "html": "<button class=\"ds-tool-card\"><strong>AI 审校</strong><small>检查译文并查看审校结果</small></button>",
+      "css": ".ds-tool-card{font-family:var(--font-ui,\"Segoe UI\",\"Microsoft YaHei UI\",sans-serif);font-size:13px;font-weight:500;display:grid;gap:12px;text-align:left;min-height:180px;padding:24px;border:1px solid var(--line,#424242);border-radius:12px;background:var(--panel,#252525);color:var(--ink,#ededed);cursor:pointer;transition:background-color .12s,border-color .12s}.ds-tool-card strong{font-size:17px;font-weight:600}.ds-tool-card small{color:var(--muted,#adadad)}.ds-tool-card:hover,.ds-tool-card:focus-visible{background:var(--panel-soft,#2c2c2c);border-color:var(--line-strong,#707070)}.ds-tool-card:focus-visible{outline:2px solid var(--focus,#6393bd);outline-offset:3px}"
+    },
+    {
+      "name": "危险操作",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "危险色文字与边线，悬停使用危险背景。",
+      "html": "<button class=\"ds-danger\">删除</button>",
+      "css": ".ds-danger{font-family:var(--font-ui,\"Segoe UI\",\"Microsoft YaHei UI\",sans-serif);font-size:13px;font-weight:500;min-height:36px;padding:0 13px;border:1px solid var(--danger-line,#77504d);border-radius:8px;background:var(--panel,#252525);color:var(--danger,#f2a29c);cursor:pointer;transition:background-color .12s,border-color .12s}.ds-danger:hover{background:var(--danger-bg,#372827)}.ds-danger:focus-visible{outline:2px solid var(--focus,#6393bd);outline-offset:3px}.ds-danger:disabled{color:var(--muted,#adadad);background:var(--panel-soft,#2c2c2c);border-color:var(--line,#424242);opacity:.65;cursor:not-allowed}"
+    }
+  ],
+  "narrative": {
+    "northStar": "克制的对话工作台",
+    "overview": "用户选定的方案 A 采用接近 Codex 使用感的中性界面：简洁侧栏、宽松正文和集中弹窗。该系统覆盖工具合集全部页面、表单、任务状态、生成结果与弹窗，中文长文件名、自定义语种和多译文列保持可辨认。\n\n`term_extractor_app/workspace_ui.py` 是唯一调色板与组件角色来源；`term_extractor_app/workspace_layout.py` 承载各页与弹窗布局，所有颜色引用语义变量；`web_app.py` 先加载布局，再追加主题。切换明暗主题只改变 token，不更换布局或启用独立旧主题规则。概念 A 只提供方向，实际源码提供数值。",
+    "keyCharacteristics": [
+      "所有页面与控件共享同一套明暗语义色。",
+      "普通按钮保持中性，仅显式主操作使用反差填色。",
+      "可点击卡片仍是内容表面，使用细边框与局部悬停反馈。",
+      "语种、列映射与任务状态依靠清晰文字和有限功能色表达。"
+    ],
+    "rules": [
+      {
+        "name": "The Shared Palette Rule",
+        "body": "全部页面、控件与弹窗引用同一语义调色板；禁止页面级旧主题配色分支。",
+        "section": "colors"
+      },
+      {
+        "name": "The Explicit Primary Rule",
+        "body": "默认按钮为中性色面；只有明确标记的主操作使用反差填色，可点击卡片保持内容表面。",
+        "section": "colors"
+      },
+      {
+        "name": "The Quiet Depth Rule",
+        "body": "普通内容保持平面；弹窗与浮层共享通用阴影。",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do 从 workspace_ui.py 的语义 token 取色，布局文件只引用这些变量。",
+      "Do 同时检查明暗主题中的页面、生成结果、表格、表单和弹窗。",
+      "Do 明确区分默认按钮、显式主操作与可点击卡片。",
+      "Do 保留键盘焦点、长文本换行、单列语种及多译文映射。"
+    ],
+    "donts": [
+      "Don't 为任何页面保留独立的深蓝、玻璃或硬编码旧主题颜色。",
+      "Don't 将所有 button 元素绘制成反差主按钮。",
+      "Don't 将工具入口卡片当作放大的主按钮。",
+      "Don't 用装饰色混淆任务状态，或在明暗主题间更换布局。"
+    ]
+  }
+}

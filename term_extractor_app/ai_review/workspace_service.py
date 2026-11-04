@@ -192,7 +192,7 @@ def _inspect(
                 attachment_id,
                 file_type=document.file_type,
                 status="ready",
-                manifest_json=document.to_manifest(),
+                manifest_json={**document.to_manifest(), **({"manual_mapping": attachment["manifest"]["manual_mapping"]} if attachment.get("manifest", {}).get("manual_mapping") else {})},
                 error_message="",
             )
             emit_event(
@@ -392,6 +392,8 @@ def _build_deterministic_plan(
         if document.file_type in {"excel", "csv", "tsv"}:
             mapped, mapping_assumptions = _map_tabular_document(session, attachment_id, document)
             for language, units in mapped.items():
+                for unit in units:
+                    unit.metadata["source_language"] = session.get("source_language", "auto")
                 targets[language].extend(units)
             assumptions.extend(mapping_assumptions)
             continue
@@ -497,7 +499,8 @@ def _build_preset_plan(
         if attachment.get("mapping_mode") != "preset" or document.file_type != "excel":
             return None
         try:
-            preset = get_excel_mapping_preset(str(attachment.get("mapping_preset_id") or ""))
+            manual = (attachment.get("manifest") or {}).get("manual_mapping")
+            preset = {"id": "", "name": "手动列设置", "mapping": manual} if manual else get_excel_mapping_preset(str(attachment.get("mapping_preset_id") or ""))
         except ValueError:
             return None
         mapping = dict(preset.get("mapping") or {})
@@ -509,21 +512,26 @@ def _build_preset_plan(
         for sheet_index, sheet_mapping in enumerate(mapping.get("sheets") or []):
             scope = sheet_names[sheet_index] if sheet_index < len(sheet_names) else str(sheet_mapping.get("sheet_name") or "")
             for column_mapping in sheet_mapping.get("mappings") or []:
+                column_language = str(column_mapping.get("target_language") or configured_language)
+                column_source = str(column_mapping.get("source_language") or mapping.get("source_language") or session.get("source_language") or "auto")
                 mapped = _map_explicit_tabular_columns(
-                    session,
+                    {**session, "target_languages": [column_language]},
                     attachment_id,
                     document,
                     source_column=(
                         None
-                        if str(session.get("source_language") or "").lower() == "none"
+                        if column_source.lower() == "none"
                         else int(column_mapping["source_column"])
                     ),
-                    target_columns=[(configured_language, int(column_mapping["target_column"]))],
+                    target_columns=[(column_language, int(column_mapping["target_column"]))],
+                    reference_columns=[int(info["column"]) for info in column_mapping.get("info_columns", [])],
                     scopes={scope} if scope else set(),
                 )
                 for language, units in mapped.items():
                     for unit in units:
                         unit.metadata["mapping_preset_id"] = preset["id"]
+                        unit.metadata["source_language"] = column_source
+                        unit.metadata["target_language"] = column_language
                     targets[language].extend(units)
     if not targets:
         return None
@@ -1065,6 +1073,8 @@ def _get_cached_profile(
                 scopes={str(mapping.get("scope") or "")} if mapping.get("scope") else set(),
                 reference_columns=[int(value) for value in mapping.get("reference_column_indexes", []) if isinstance(value, int)],
             )
+            for unit in mapped.get(language) or []:
+                unit.metadata["source_language"] = mapping.get("source_language", profile.get("source_language", "auto"))
             targets[language].extend(mapped.get(language) or [])
     except (TypeError, ValueError, KeyError):
         return None
@@ -1137,6 +1147,7 @@ def save_confirmed_profile(run_id: str) -> None:
                         "source_column_index": key[3],
                         "target_column_index": key[4],
                         "reference_column_indexes": list(key[5]),
+                        "source_language": metadata.get("source_language", raw_plan.get("source_language", "auto")),
                     }
                 )
         if not profile_plan["mappings"]:

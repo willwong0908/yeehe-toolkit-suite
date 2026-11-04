@@ -195,6 +195,7 @@ def read_excel_items_by_mapping(path: Path, mapping: dict[str, Any], source_file
                         "status_note": status_note,
                         "item_order": order,
                         "info": info_items,
+                        "location": {"source_language": column_mapping.get("source_language") or mapping.get("source_language") or "auto", "target_language": column_mapping.get("target_language") or mapping.get("target_language") or "auto"},
                         "source_column": source_label,
                         "target_column": target_label,
                     }
@@ -222,8 +223,6 @@ def validate_excel_mapping(mapping: dict[str, Any]) -> None:
                 raise ValueError(f"{sheet_name} 存在未选择原文列的配置")
             if target_index is None:
                 raise ValueError(f"{sheet_name} 的 {get_column_letter(source_index + 1)} 列缺少译文列")
-            if source_index in source_columns:
-                raise ValueError(f"{sheet_name} 的 {get_column_letter(source_index + 1)} 列被重复设置为原文列")
             if target_index in target_columns:
                 raise ValueError(f"{sheet_name} 的 {get_column_letter(target_index + 1)} 列被多个原文列共用为译文列")
             if source_index == target_index:
