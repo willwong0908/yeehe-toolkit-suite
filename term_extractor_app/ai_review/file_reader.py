@@ -13,7 +13,7 @@ def detect_file_type(path: Path) -> str:
         return "excel"
     if suffix in SUPPORTED_XLIFF_EXTENSIONS:
         return "xliff"
-    raise ValueError("仅支持 Excel（.xlsx/.xlsm）和 XLIFF（.xlf/.xliff）文件")
+    raise ValueError("仅支持 Excel（.xlsx/.xlsm/.xls）和 XLIFF（.xlf/.xliff）文件")
 
 
 __all__ = [

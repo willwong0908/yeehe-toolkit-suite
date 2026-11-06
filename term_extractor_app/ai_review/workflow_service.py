@@ -128,8 +128,8 @@ def start_session_review(session_id: str, run_id: str | None = None) -> list[dic
     return created
 
 
-def get_session_task_results(session_id: str) -> list[dict[str, Any]]:
-    snapshot = get_session_snapshot(session_id)
+def get_session_task_results(session_id: str, *, snapshot: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    snapshot = snapshot if snapshot is not None else get_session_snapshot(session_id)
     if snapshot is None:
         raise ValueError("审校会话不存在")
     latest_run_id = str(snapshot.get("workspace_runs", [{}])[0].get("id") or "") if snapshot.get("workspace_runs") else ""

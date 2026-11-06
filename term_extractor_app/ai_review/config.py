@@ -19,7 +19,7 @@ DB_PATH = DATA_DIR / "app.sqlite3"
 HOST = "127.0.0.1"
 PORT = 8765
 
-SUPPORTED_EXCEL_EXTENSIONS = {".xlsx", ".xlsm"}
+SUPPORTED_EXCEL_EXTENSIONS = {".xlsx", ".xlsm", ".xls"}
 SUPPORTED_XLIFF_EXTENSIONS = {".xlf", ".xliff"}
 
 

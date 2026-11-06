@@ -118,6 +118,31 @@ class ReaderRegistryTests(unittest.TestCase):
             self.assertEqual(registry.read(json_path).blocks[0].pointer, "$/source")
             self.assertEqual(registry.read(docx_path).blocks[0].text, "你好")
 
+    def test_csv_accepts_record_newline_variants_and_preserves_quoted_breaks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, line_break in enumerate(("\r", "\n", "\r\n")):
+                path = root / f"case-{index}.csv"
+                path.write_bytes(("Source,Target" + line_break + '"first\r\nsecond",译文' + line_break + "hello,你好" + line_break).encode("utf-8"))
+                doc = build_default_registry().read(path)
+                self.assertEqual(doc.structure["row_count"], 3)
+                cells = {block.pointer: block.text for block in doc.blocks}
+                self.assertEqual(cells["row:2/column:1"], "first\r\nsecond")
+                self.assertEqual(cells["row:2/column:2"], "译文")
+                self.assertEqual(cells["row:3/column:2"], "你好")
+            mixed = root / "mixed.csv"
+            mixed.write_bytes("Source,Target\r\nfirst,甲\rsecond,乙\n".encode("utf-8"))
+            self.assertEqual(build_default_registry().read(mixed).structure["row_count"], 3)
+
+    def test_invalid_xlsx_reports_format_problem_in_plain_language(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "invalid.xlsx"
+            path.write_bytes(b"not an xlsx workbook")
+            with self.assertRaises(ReaderError) as caught:
+                build_default_registry().read(path)
+            self.assertIn("不是可读取的 Excel", str(caught.exception))
+            self.assertIn("另存为", str(caught.exception))
+
     def test_rejects_unknown_extension(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "sample.unknown"

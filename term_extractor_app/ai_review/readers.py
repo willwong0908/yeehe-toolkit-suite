@@ -13,7 +13,7 @@ from xml.etree import ElementTree as ET
 
 from openpyxl.utils import get_column_letter
 
-from ..excel_streaming import open_streaming_workbook
+from .excel_compat import open_review_workbook, ExcelCompatibilityError
 from .inline_xml import inner_xml
 from .types import ReaderBlock, ReaderDocument
 from .xliff_reader import read_xliff_items, read_xliff_language_metadata
@@ -53,18 +53,16 @@ class BaseReader(ABC):
 
 class ExcelReader(BaseReader):
     name = "excel"
-    extensions = (".xlsx", ".xlsm")
+    extensions = (".xlsx", ".xlsm", ".xls")
 
     def read(self, path: Path, original_filename: str) -> ReaderDocument:
         blocks: list[ReaderBlock] = []
         sheets: list[dict[str, Any]] = []
-        # Openpyxl validates a path's suffix before opening it.  Private cache
-        # filenames can be suffix-less, so pass a binary stream and the original
-        # attachment suffix instead of trusting the cache name.
-        with path.open("rb") as stream, open_streaming_workbook(
-            stream,
-            extension_hint=Path(original_filename).suffix,
-        ) as workbook:
+        try:
+            workbook = open_review_workbook(path)
+        except ExcelCompatibilityError as exc:
+            raise ReaderError(str(exc)) from exc
+        with workbook:
             for sheet in workbook.worksheets:
                 rows = sheet.iter_rows(values_only=True)
                 header_row = next(rows, None) or ()
@@ -165,7 +163,11 @@ class DelimitedReader(BaseReader):
         raw = path.read_bytes()
         text, encoding = decode_text(raw)
         delimiter = "\t" if path.suffix.lower() == ".tsv" else _sniff_delimiter(text)
-        rows = list(csv.reader(io.StringIO(text), delimiter=delimiter))
+        try:
+            # Preserve quoted cell line breaks while accepting CR, LF and CRLF records.
+            rows = list(csv.reader(io.StringIO(text, newline=""), delimiter=delimiter))
+        except csv.Error as exc:
+            raise ReaderError(f"表格文本无法解析，请检查分隔符和引号是否匹配：{exc}") from exc
         if not rows:
             raise ReaderError("表格文件为空")
         headers = [_text(value) for value in rows[0]]

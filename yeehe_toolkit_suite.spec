@@ -10,6 +10,7 @@ hiddenimports = [
     "starlette",
     "pydantic",
     "pypdf",
+    "xlrd",
 ]
 excludes = [
     "IPython",

@@ -152,6 +152,34 @@ class ConversationApiTests(unittest.TestCase):
         with patch.object(conversation_routes, "add_attachment_stream", side_effect=slow_copy), patch.object(conversation_routes, "build_default_registry", side_effect=AssertionError("Upload must not parse workbook")):
             asyncio.run(verify())
 
+    def test_deleted_conversation_during_inspection_does_not_raise_from_error_handler(self) -> None:
+        sid = session_store.create_session()["id"]
+        run = session_store.create_workspace_run(sid, model="test", input_signature="test")
+        session_store.delete_session(sid)
+        with patch.object(workspace_service, "_inspect", side_effect=ValueError("审校会话不存在")):
+            workspace_service._run_inspection(sid, run["id"], "", "", [], "")
+        self.assertIsNone(session_store.get_session(sid))
+
+    def test_legacy_workbook_manual_mapping_and_original_content_type(self) -> None:
+        fixture=Path(__file__).parent/'tests'/'fixtures'/'legacy_review.xls'
+        for filename in ('legacy.xls','mislabeled.xlsx'):
+            sid=session_store.create_session()["id"]
+            response=self.client.post(f"/api/ai-review/conversations/{sid}/attachments",files={"files":(filename,fixture.read_bytes(),'application/octet-stream')})
+            self.assertEqual(response.status_code,200,response.text)
+            aid=response.json()['attachments'][0]['id']
+            route=f"/api/ai-review/conversations/{sid}/attachments/{aid}"
+            structure=self.client.get(route+'/structure')
+            self.assertEqual(structure.status_code,200,structure.text)
+            self.assertEqual(structure.json()['manifest']['structure']['sheets'][0]['name'],'日语')
+            mapping={'sheets':[{'sheet_name':'日语','mappings':[{'source_column':0,'target_column':1,'source_language':'英语','target_language':'日语','info_columns':[{'column':2,'category':'备注'}]}]}]}
+            configured=self.client.patch(route,json={'mode':'preset','mapping':mapping})
+            self.assertEqual(configured.status_code,200,configured.text)
+            with patch.object(workspace_service,'workspace_chat',side_effect=AssertionError('Manual mapping must not call model')):
+                plan=workspace_service.inspect_workspace_sync(sid)
+            self.assertFalse(plan['needs_input'])
+            self.assertEqual(len(plan['targets'][0]['units']),3)
+            self.assertEqual(plan['targets'][0]['units'][0]['target_text'],'こんにちは\n{player}')
+
     def test_inline_mapping_preserves_multiple_targets_and_column_languages(self) -> None:
         sid = self.client.post("/api/ai-review/conversations", json={"source_language": "日语", "target_languages": ["日语"]}).json()["session"]["id"]
         workbook = Workbook(); sheet = workbook.active

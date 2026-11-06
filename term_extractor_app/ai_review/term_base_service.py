@@ -10,7 +10,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
-from openpyxl import load_workbook
+from .excel_compat import open_review_workbook
 
 from .config import TERM_BASES_DIR, ensure_directories
 from .database import dumps_json, get_connection, init_db, loads_json, utc_now
@@ -18,7 +18,7 @@ from .database import dumps_json, get_connection, init_db, loads_json, utc_now
 
 MAX_TERM_BASE_BYTES = 50 * 1024 * 1024
 MAX_MATCHED_ENTRIES_PER_ITEM = 50
-SUPPORTED_TERM_BASE_EXTENSIONS = {".xlsx", ".xlsm"}
+SUPPORTED_TERM_BASE_EXTENSIONS = {".xlsx", ".xlsm", ".xls"}
 METADATA_HEADERS = {
     "entry_id": "entry_id",
     "entry_subject": "entry_subject",
@@ -117,7 +117,7 @@ def upload_term_base(filename: str, data: bytes) -> dict[str, Any]:
     safe_name = Path(str(filename or "")).name.strip()
     suffix = Path(safe_name).suffix.lower()
     if not safe_name or suffix not in SUPPORTED_TERM_BASE_EXTENSIONS:
-        raise TermBaseError("术语表仅支持 .xlsx 或 .xlsm 格式")
+        raise TermBaseError("术语表支持 .xlsx、.xlsm 或 .xls 格式")
     if not data:
         raise TermBaseError("术语表文件为空")
     if len(data) > MAX_TERM_BASE_BYTES:
@@ -276,7 +276,7 @@ def resolve_term_table_language(language: str, available: list[str]) -> str:
 
 def _parse_term_table_workbook(data: bytes) -> dict[str, Any]:
     try:
-        workbook = load_workbook(BytesIO(data), read_only=True, data_only=True)
+        workbook = open_review_workbook(BytesIO(data))
     except Exception as exc:
         raise TermBaseError(f"无法读取术语表：{exc}") from exc
     try:

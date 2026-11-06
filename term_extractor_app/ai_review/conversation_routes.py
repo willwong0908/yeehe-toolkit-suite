@@ -260,7 +260,7 @@ def conversation(session_id: str) -> dict[str, Any]:
     snapshot = get_session_snapshot(session_id)
     if snapshot is None:
         raise HTTPException(status_code=404, detail="审校会话不存在")
-    snapshot["task_results"] = get_session_task_results(session_id)
+    snapshot["task_results"] = get_session_task_results(session_id, snapshot=snapshot)
     return snapshot
 
 
@@ -359,7 +359,7 @@ def configure_attachment_mapping(
     manifest = dict(attachment.get("manifest") or {})
     manifest.pop("manual_mapping", None)
     if mode == "preset":
-        if attachment["original_filename"].lower().endswith((".xlsx", ".xlsm")) is False:
+        if attachment["original_filename"].lower().endswith((".xlsx", ".xlsm", ".xls")) is False:
             raise HTTPException(status_code=400, detail="映射模板仅适用于 Excel 文件")
         try:
             if payload.mapping is not None:
@@ -386,7 +386,7 @@ def inspect_attachment_structure(session_id: str, attachment_id: str) -> dict[st
         raise HTTPException(status_code=404, detail="附件不存在")
     if attachment.get("sent_at"):
         raise HTTPException(status_code=400, detail="已发送附件不能修改导入方式")
-    if not str(attachment.get("original_filename") or "").lower().endswith((".xlsx", ".xlsm")):
+    if not str(attachment.get("original_filename") or "").lower().endswith((".xlsx", ".xlsm", ".xls")):
         raise HTTPException(status_code=400, detail="只有 Excel 文件支持手动映射")
     stored_path = Path(str(attachment.get("stored_path") or ""))
     if not stored_path.is_file():

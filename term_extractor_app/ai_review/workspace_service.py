@@ -20,6 +20,7 @@ from .session_store import (
     create_question,
     create_workspace_run,
     emit_event,
+    get_session,
     get_session_snapshot,
     update_attachment,
     update_session,
@@ -156,7 +157,13 @@ def _run_inspection(
     except Exception as exc:
         message = str(exc) or repr(exc)
         update_workspace_run(run_id, status="failed", error=message)
-        update_session(session_id, status="failed", error_message=message)
+        try:
+            update_session(session_id, status="failed", error_message=message)
+        except ValueError:
+            # A deleted conversation has no UI left to report into.
+            if get_session(session_id) is None:
+                return
+            raise
         add_message(session_id, "assistant", "error", f"文件识别失败：{message}")
         emit_event(session_id, "workspace.failed", {"run_id": run_id, "message": message})
         track_event("task_fail.ai_review_workspace")

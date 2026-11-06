@@ -2,11 +2,25 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
+from pathlib import Path
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any, Iterator
 
 from .config import DB_PATH, ensure_directories
+
+
+_init_lock = threading.RLock()
+_initialized_databases: dict[str, tuple[int, int]] = {}
+
+
+def _database_identity(path: Path) -> tuple[int, int] | None:
+    try:
+        info = path.stat()
+        return (info.st_dev, info.st_ino)
+    except FileNotFoundError:
+        return None
 
 
 def utc_now() -> str:
@@ -16,7 +30,7 @@ def utc_now() -> str:
 @contextmanager
 def get_connection() -> Iterator[sqlite3.Connection]:
     ensure_directories()
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
     conn.row_factory = sqlite3.Row
     try:
         yield conn
@@ -26,7 +40,22 @@ def get_connection() -> Iterator[sqlite3.Connection]:
 
 
 def init_db() -> None:
+    # Schema migration and journal setup happen once per database file in this
+    # process, never on each chat refresh. Recreated test/restored DBs reinitialize.
+    path = Path(DB_PATH).resolve()
+    with _init_lock:
+        identity = _database_identity(path)
+        if identity is not None and _initialized_databases.get(str(path)) == identity:
+            return
+        _initialize_database()
+        _initialized_databases[str(path)] = _database_identity(path)
+
+
+def _initialize_database() -> None:
     with get_connection() as conn:
+        # WAL lets snapshot readers coexist with the review writer. SQLite still
+        # serializes writers and honors the connection's bounded busy timeout.
+        conn.execute("PRAGMA journal_mode=WAL").fetchone()
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS file_batches (
@@ -510,6 +539,9 @@ def init_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_review_term_entries_base ON review_term_entries(term_base_id, row_number)"
         )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_review_results_task_item_status ON review_results(task_id, item_id, status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_file_items_batch_order ON file_items(batch_id, item_order)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_review_task_logs_task_id ON review_task_logs(task_id, id)")
         from .learning_service import init_learning_tables
         init_learning_tables(conn)
 

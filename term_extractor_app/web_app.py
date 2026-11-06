@@ -6,6 +6,8 @@ import json
 import csv
 import os
 import re
+import sqlite3
+import logging
 import subprocess
 import sys
 import tempfile
@@ -18,7 +20,7 @@ from typing import Optional
 import httpx
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from openpyxl.utils import get_column_letter
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -1011,6 +1013,16 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
     task_facade = facade or ExtractionTaskFacade()
     diff_task_service = DiffTaskService()
     app = FastAPI(title="AI Term Extractor WebUI")
+
+    @app.exception_handler(sqlite3.OperationalError)
+    async def database_error(request, exc):
+        # Record the traceback and route only; do not log request bodies or keys.
+        logger = logging.getLogger("term_extractor_app")
+        logger.error("[WEBUI] 数据库请求失败：%s %s", request.method, request.url.path, exc_info=(type(exc), exc, exc.__traceback__))
+        if "locked" in str(exc).lower() or "busy" in str(exc).lower():
+            return JSONResponse(status_code=503, content={"detail": "本地数据库正忙，请稍后重试；已完成的审校结果会保留。"})
+        return JSONResponse(status_code=500, content={"detail": "本地数据库操作失败，请查看日志。"})
+
     init_ai_review_db()
     recover_interrupted_review_tasks()
     app.include_router(ai_review_conversation_router)
@@ -1685,8 +1697,8 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
             selected_paths = select_files_dialog(
                 "选择待审校文件",
                 [
-                    ("支持的文件", "*.xlsx *.xlsm *.xlf *.xliff"),
-                    ("Excel 文件", "*.xlsx *.xlsm"),
+                    ("支持的文件", "*.xlsx *.xlsm *.xls *.xlf *.xliff"),
+                    ("Excel 文件", "*.xlsx *.xlsm *.xls"),
                     ("XLIFF 文件", "*.xlf *.xliff"),
                 ],
                 multiple=False,
@@ -1703,7 +1715,7 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
             selected = select_files_dialog(
                 "选择待审校文件",
                 [
-                    ("支持的文件", "*.xlsx *.xlsm *.xlf *.xliff *.csv *.tsv *.txt *.md *.docx *.pptx *.pdf *.json *.xml"),
+                    ("支持的文件", "*.xlsx *.xlsm *.xls *.xlf *.xliff *.csv *.tsv *.txt *.md *.docx *.pptx *.pdf *.json *.xml"),
                     ("所有文件", "*.*"),
                 ],
                 multiple=True,
@@ -3087,8 +3099,8 @@ INDEX_HTML = """<!doctype html>
                   <button id="reviewUploadChip" class="composer-chip" type="button">＋ 文件</button>
                   <button id="reviewFeedbackUploadButton" class="composer-chip" type="button">上传优化文件</button>
                   <input id="reviewFeedbackFileInput" type="file" accept=".xlsx" hidden />
-                  <input id="reviewConversationFileInput" type="file" accept=".xlsx,.xlsm,.xlf,.xliff,.csv,.tsv,.txt,.md,.docx,.pptx,.pdf,.json,.xml" multiple hidden />
-                  <input id="reviewTermBaseFileInput" type="file" accept=".xlsx,.xlsm" hidden />
+                  <input id="reviewConversationFileInput" type="file" accept=".xlsx,.xlsm,.xls,.xlf,.xliff,.csv,.tsv,.txt,.md,.docx,.pptx,.pdf,.json,.xml" multiple hidden />
+                  <input id="reviewTermBaseFileInput" type="file" accept=".xlsx,.xlsm,.xls" hidden />
                 </div>
                 <button id="sendReviewConversationButton" class="primary review-send-button" type="button">发送</button>
               </div>
@@ -3106,7 +3118,7 @@ INDEX_HTML = """<!doctype html>
               <div id="reviewTermBasePopover" class="review-term-base-popover hidden" role="menu" aria-label="选择术语表">
                 <div class="review-term-base-search"><input id="reviewTermBaseSearch" type="search" placeholder="搜索 memoQ 术语库" autocomplete="off" /></div>
                 <button id="uploadReviewTermBaseButton" class="review-term-base-action" type="button" role="menuitem">
-                  <span class="review-term-base-action-icon">＋</span><span><strong>上传术语表</strong><small>支持 .xlsx、.xlsm；自动识别语种列</small></span>
+                  <span class="review-term-base-action-icon">＋</span><span><strong>上传术语表</strong><small>支持 .xlsx、.xlsm、.xls；自动识别语种列</small></span>
                 </button>
                 <div id="reviewTermBaseOptions" class="review-term-base-options"></div>
               </div>
@@ -7090,7 +7102,7 @@ async function openReviewAttachmentMappingDialog(attachment) {
     input.checked = input.value === requestedMode;
   });
   select.value = attachment.mapping_preset_id || select.options[0]?.value || "";
-  const isExcel = /\.(xlsx|xlsm)$/i.test(attachment.original_filename || "");
+  const isExcel = /\.(xlsx|xlsm|xls)$/i.test(attachment.original_filename || "");
   const presetRadio = document.querySelector('input[name="reviewAttachmentMappingMode"][value="preset"]');
   presetRadio.disabled = !isExcel;
   if (!isExcel && requestedMode === "preset") {

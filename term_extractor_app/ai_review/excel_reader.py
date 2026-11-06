@@ -3,10 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
-from ..excel_streaming import open_streaming_workbook
+from .excel_compat import open_review_workbook
 
 
 def _cell_to_text(value: Any) -> str:
@@ -37,12 +36,12 @@ def _sheet_columns(sheet: Any) -> list[dict[str, Any]]:
 
 def read_excel_headers(path: Path) -> dict[str, Any]:
     try:
-        with open_streaming_workbook(path) as workbook:
+        with open_review_workbook(path) as workbook:
             return _read_headers_from_workbook(workbook)
     except Exception:
         # A small number of malformed exports cannot be traversed in read-only
         # mode.  Preserve the old compatibility path for those files only.
-        workbook = load_workbook(path, read_only=False, data_only=True)
+        workbook = open_review_workbook(path, read_only=False)
         try:
             return _read_headers_from_workbook(workbook)
         finally:
@@ -77,105 +76,24 @@ def _read_headers_from_workbook(workbook: Any) -> dict[str, Any]:
 
 
 def read_excel_items(path: Path, source_column: str, target_column: str, source_file: str) -> list[dict[str, Any]]:
-    workbook = load_workbook(path, read_only=True, data_only=True)
-    items: list[dict[str, Any]] = []
-    order = 0
+    with open_review_workbook(path) as workbook:
+        items: list[dict[str, Any]] = []
+        order = 0
 
-    for sheet in workbook.worksheets:
-        header_row = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
-        headers = [_cell_to_text(value) for value in header_row] if header_row else []
-        if source_column not in headers or target_column not in headers:
-            continue
-
-        source_index = headers.index(source_column)
-        target_index = headers.index(target_column)
-
-        for row_number, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
-            source_text = _cell_to_text(row[source_index]) if source_index < len(row) else ""
-            target_text = _cell_to_text(row[target_index]) if target_index < len(row) else ""
-            if not source_text and not target_text:
+        for sheet in workbook.worksheets:
+            header_row = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
+            headers = [_cell_to_text(value) for value in header_row] if header_row else []
+            if source_column not in headers or target_column not in headers:
                 continue
 
-            status_note = ""
-            if not source_text:
-                status_note = "原文为空"
-            elif not target_text:
-                status_note = "译文为空"
+            source_index = headers.index(source_column)
+            target_index = headers.index(target_column)
 
-            order += 1
-            items.append(
-                {
-                    "source_file": source_file,
-                    "sheet_name": sheet.title,
-                    "segment_id": None,
-                    "row_number": row_number,
-                    "source_text": source_text,
-                    "target_text": target_text,
-                    "status_note": status_note,
-                    "item_order": order,
-                    "info": [],
-                    "source_column": get_column_letter(source_index + 1),
-                    "target_column": get_column_letter(target_index + 1),
-                }
-            )
-
-    workbook.close()
-    if not items:
-        raise ValueError("没有读取到可审校条目，请检查原文列和译文列是否选择正确")
-    return items
-
-
-def read_excel_items_by_mapping(path: Path, mapping: dict[str, Any], source_file: str) -> list[dict[str, Any]]:
-    validate_excel_mapping(mapping)
-    workbook = load_workbook(path, read_only=True, data_only=True)
-    sheet_map = {sheet.title: sheet for sheet in workbook.worksheets}
-    items: list[dict[str, Any]] = []
-    order = 0
-
-    for sheet_config in mapping.get("sheets", []):
-        sheet_name = str(sheet_config.get("sheet_name") or "")
-        sheet = sheet_map.get(sheet_name)
-        if sheet is None:
-            continue
-
-        mappings = sheet_config.get("mappings", [])
-        if not isinstance(mappings, list):
-            continue
-
-        for column_mapping in mappings:
-            source_index = _as_column_index(column_mapping.get("source_column"))
-            target_index = _as_column_index(column_mapping.get("target_column"))
-            if source_index is None or target_index is None:
-                continue
-
-            info_columns = _normalize_info_columns(column_mapping.get("info_columns", []))
-            source_label = get_column_letter(source_index + 1)
-            target_label = get_column_letter(target_index + 1)
-            max_column = max(
-                [source_index, target_index, *[info_column["column"] for info_column in info_columns]]
-            ) + 1
-
-            for row_number, row in enumerate(
-                sheet.iter_rows(min_row=2, max_col=max_column, values_only=True),
-                start=2,
-            ):
+            for row_number, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
                 source_text = _cell_to_text(row[source_index]) if source_index < len(row) else ""
                 target_text = _cell_to_text(row[target_index]) if target_index < len(row) else ""
                 if not source_text and not target_text:
                     continue
-
-                info_items = []
-                for info_column in info_columns:
-                    index = info_column["column"]
-                    value = _cell_to_text(row[index]) if index < len(row) else ""
-                    if value:
-                        info_items.append(
-                            {
-                                "category": info_column.get("category", ""),
-                                "value": value,
-                                "column": get_column_letter(index + 1),
-                            }
-                        )
 
                 status_note = ""
                 if not source_text:
@@ -194,14 +112,93 @@ def read_excel_items_by_mapping(path: Path, mapping: dict[str, Any], source_file
                         "target_text": target_text,
                         "status_note": status_note,
                         "item_order": order,
-                        "info": info_items,
-                        "location": {"source_language": column_mapping.get("source_language") or mapping.get("source_language") or "auto", "target_language": column_mapping.get("target_language") or mapping.get("target_language") or "auto"},
-                        "source_column": source_label,
-                        "target_column": target_label,
+                        "info": [],
+                        "source_column": get_column_letter(source_index + 1),
+                        "target_column": get_column_letter(target_index + 1),
                     }
                 )
 
-    workbook.close()
+    if not items:
+        raise ValueError("没有读取到可审校条目，请检查原文列和译文列是否选择正确")
+    return items
+
+
+def read_excel_items_by_mapping(path: Path, mapping: dict[str, Any], source_file: str) -> list[dict[str, Any]]:
+    validate_excel_mapping(mapping)
+    with open_review_workbook(path) as workbook:
+        sheet_map = {sheet.title: sheet for sheet in workbook.worksheets}
+        items: list[dict[str, Any]] = []
+        order = 0
+
+        for sheet_config in mapping.get("sheets", []):
+            sheet_name = str(sheet_config.get("sheet_name") or "")
+            sheet = sheet_map.get(sheet_name)
+            if sheet is None:
+                continue
+
+            mappings = sheet_config.get("mappings", [])
+            if not isinstance(mappings, list):
+                continue
+
+            for column_mapping in mappings:
+                source_index = _as_column_index(column_mapping.get("source_column"))
+                target_index = _as_column_index(column_mapping.get("target_column"))
+                if source_index is None or target_index is None:
+                    continue
+
+                info_columns = _normalize_info_columns(column_mapping.get("info_columns", []))
+                source_label = get_column_letter(source_index + 1)
+                target_label = get_column_letter(target_index + 1)
+                max_column = max(
+                    [source_index, target_index, *[info_column["column"] for info_column in info_columns]]
+                ) + 1
+
+                for row_number, row in enumerate(
+                    sheet.iter_rows(min_row=2, max_col=max_column, values_only=True),
+                    start=2,
+                ):
+                    source_text = _cell_to_text(row[source_index]) if source_index < len(row) else ""
+                    target_text = _cell_to_text(row[target_index]) if target_index < len(row) else ""
+                    if not source_text and not target_text:
+                        continue
+
+                    info_items = []
+                    for info_column in info_columns:
+                        index = info_column["column"]
+                        value = _cell_to_text(row[index]) if index < len(row) else ""
+                        if value:
+                            info_items.append(
+                                {
+                                    "category": info_column.get("category", ""),
+                                    "value": value,
+                                    "column": get_column_letter(index + 1),
+                                }
+                            )
+
+                    status_note = ""
+                    if not source_text:
+                        status_note = "原文为空"
+                    elif not target_text:
+                        status_note = "译文为空"
+
+                    order += 1
+                    items.append(
+                        {
+                            "source_file": source_file,
+                            "sheet_name": sheet.title,
+                            "segment_id": None,
+                            "row_number": row_number,
+                            "source_text": source_text,
+                            "target_text": target_text,
+                            "status_note": status_note,
+                            "item_order": order,
+                            "info": info_items,
+                            "location": {"source_language": column_mapping.get("source_language") or mapping.get("source_language") or "auto", "target_language": column_mapping.get("target_language") or mapping.get("target_language") or "auto"},
+                            "source_column": source_label,
+                            "target_column": target_label,
+                        }
+                    )
+
     if not items:
         raise ValueError("没有读取到可审校条目，请检查列映射是否正确")
     return items

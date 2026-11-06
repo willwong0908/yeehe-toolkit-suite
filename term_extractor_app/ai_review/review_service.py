@@ -5,6 +5,7 @@ import copy
 import hashlib
 import json
 import logging
+import sqlite3
 import traceback
 import threading
 import time
@@ -789,7 +790,17 @@ async def _run_review_packages(
     evidence_index = EvidenceIndex(corpus or [item for package in packages for item in package], config)
 
     def on_stream_phase(package_index: int, phase: str) -> None:
-        _set_review_request_status(task_id, package_index, phase)
+        try:
+            _set_review_request_status(task_id, package_index, phase)
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() and "busy" not in str(exc).lower():
+                raise
+            # A transient progress-display failure must not abort a paid stream.
+            logger = logging.getLogger(LOGGER_NAME)
+            if not logger.handlers:
+                logger = configure_file_logger(with_console=True)
+            logger.warning("[AI_REVIEW][%s] 进度状态暂未写入：数据库正忙，包 %s，阶段 %s", task_id, package_index, phase)
+            return
         phase_label = {"thinking": "思考", "output": "输出"}.get(str(phase))
         if phase_label:
             _add_log(task_id, "info", f"第 {package_index}/{len(packages)} 包进入{phase_label}阶段。")
@@ -879,8 +890,6 @@ async def _run_review_packages(
                 f"第 {package_index}/{len(packages)} 包常规重试已耗尽，进入最后一次 AI 兜底纠错。",
             )
             return
-        _set_review_request_status(task_id, package_index, "completed" if response.success else "failed", response.attempts)
-        _add_log(task_id, "info", f"第 {package_index}/{len(packages)} 包完成，包含 {len(package)} 条，并发 {snapshot.current_concurrency}")
         if response.success:
             parsed_items = _parse_json_object(response.content).get("items", [])
             result_by_id = {str(item.get("id")): item for item in parsed_items if isinstance(item, dict)}
@@ -909,6 +918,9 @@ async def _run_review_packages(
             _add_log(task_id, "error", f"第 {package_index} 包失败，已重试 {max(0, response.attempts - 1)} 次：{message}")
             _save_review_errors_bulk(task_id, package, message)
 
+        # A request is complete only after its results are safely committed.
+        _set_review_request_status(task_id, package_index, "completed" if response.success else "failed", response.attempts)
+        _add_log(task_id, "info", f"第 {package_index}/{len(packages)} 包完成，包含 {len(package)} 条，并发 {snapshot.current_concurrency}")
         with counters_lock:
             completed_count += len(package)
             if not response.success:
@@ -1769,20 +1781,23 @@ def _request_state_to_dict(row: Any) -> dict[str, Any]:
 
 
 def _add_log(task_id: str, level: str, message: str) -> None:
-    timestamp = utc_now()
-    with get_connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO review_task_logs (task_id, level, message, created_at)
-            SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM review_tasks WHERE id=?)
-            """,
-            (task_id, level, message, timestamp, task_id),
-        )
+    # Preserve the file log even if the database is the failing component.
     logger = logging.getLogger(LOGGER_NAME)
     if not logger.handlers:
         logger = configure_file_logger(with_console=True)
     log_method = getattr(logger, str(level or "info").lower(), logger.info)
     log_method("[AI_REVIEW][%s] %s", task_id, message)
+    try:
+        with get_connection() as conn:
+            conn.execute(
+                """INSERT INTO review_task_logs (task_id, level, message, created_at)
+                   SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM review_tasks WHERE id=?)""",
+                (task_id, level, message, utc_now(), task_id),
+            )
+    except sqlite3.OperationalError as exc:
+        if "locked" not in str(exc).lower() and "busy" not in str(exc).lower():
+            raise
+        logger.warning("[AI_REVIEW][%s] 数据库忙，任务日志已写入文件，暂未写入数据库。", task_id)
 
 
 def _mark_unfinished_review_requests_failed(task_id: str) -> None:
