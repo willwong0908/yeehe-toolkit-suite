@@ -1027,6 +1027,8 @@ def create_app(facade: Optional[ExtractionTaskFacade] = None) -> FastAPI:
     recover_interrupted_review_tasks()
     app.include_router(ai_review_conversation_router)
     app.include_router(ai_review_term_base_router)
+    from term_extractor_app.feishu_transfer import router as transfer_router
+    app.include_router(transfer_router)
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
@@ -2377,14 +2379,7 @@ INDEX_HTML = """<!doctype html>
           </div>
         </details>
 
-        <details class="nav-accordion" data-accordion-key="diff-tool">
-          <summary class="nav-accordion-summary">
-            <span class="nav-group-title">Diff 工具</span>
-          </summary>
-          <div class="nav-submenu">
-            <button class="nav-link nav-link-sub" data-page-target="diffExcelPage">Excel差异比对</button>
-          </div>
-        </details>
+        <button class="nav-link nav-link-top" data-page-target="diffExcelPage">Diff 工具</button>
 
         <details class="nav-accordion" data-accordion-key="ai-review-tool">
           <summary class="nav-accordion-summary">
@@ -2396,14 +2391,8 @@ INDEX_HTML = """<!doctype html>
           </div>
         </details>
 
-        <details class="nav-accordion" data-accordion-key="cross-excel-search">
-          <summary class="nav-accordion-summary">
-            <span class="nav-group-title">跨Excel搜索与合并</span>
-          </summary>
-          <div class="nav-submenu">
-            <button class="nav-link nav-link-sub" data-page-target="crossExcelPage">搜索与合并</button>
-          </div>
-        </details>
+        <button class="nav-link nav-link-top" data-page-target="crossExcelPage">跨Excel搜索与合并</button>
+        <button class="nav-link nav-link-top" data-page-target="feishuTransferPage">飞书文件传输</button>
       </nav>
       <div class="sidebar-actions-panel">
         <button id="themeToggleButton" class="theme-toggle-button" type="button" aria-pressed="false" title="切换主题">
@@ -2453,6 +2442,11 @@ INDEX_HTML = """<!doctype html>
             <span class="tool-guide-card-top"><span class="tool-guide-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="16" height="16" rx="1.5"></rect><path d="M4 10h16M10 4v16M14 10v10"></path></svg></span><span class="tool-guide-badge">多文件</span></span>
             <span class="tool-guide-card-copy"><strong>跨 Excel</strong><small>跨文件搜索和按表头合并。</small></span>
             <span class="tool-guide-card-footer"><span>搜索与合并</span><span class="tool-guide-arrow" aria-hidden="true">→</span></span>
+          </button>
+          <button class="tool-guide-card tool-guide-card-transfer" type="button" data-tool-guide="feishuTransfer" aria-label="打开飞书文件传输工具说明">
+            <span class="tool-guide-card-top"><span class="tool-guide-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 3.5h8l4 4V14M14 3.5v4h4M6 3.5V20h5M13 17h8m-3-3 3 3-3 3"></path></svg></span></span>
+            <span class="tool-guide-card-copy"><strong>飞书文件传输</strong><small>本机直传文件到飞书，按群发送附件或群文件文档链接。</small></span>
+            <span class="tool-guide-card-footer"><span>多文件上传与大文件分享</span><span class="tool-guide-arrow" aria-hidden="true">→</span></span>
           </button>
         </div>
       </section>
@@ -2802,6 +2796,7 @@ INDEX_HTML = """<!doctype html>
         </div>
       </section>
 
+      __TRANSFER_PAGE__
       <section id="crossExcelPage" class="page-section">
         <div class="grid dashboard-grid">
           <section class="card">
@@ -3838,6 +3833,7 @@ const PAGE_TASK_LABELS = {
   aiReviewForbiddenPage: "AI 审校工具",
 };
 const PAGE_HERO_COPY = {
+  feishuTransferPage: {title:"飞书文件传输", lede:"选择群聊，由信鸽发送文件。"},
   toolGuidePage: { title: "工具说明", lede: "先了解每个工具能做什么，再开始任务。" },
   overviewPage: { title: "文本预处理工具", lede: "用于提取术语、识别非译元素，并整理文本预处理结果。" },
   modelSettingsPage: { title: "设置", lede: "统一管理模型连接与 memoQ 账号。" },
@@ -3859,13 +3855,19 @@ const PAGE_ACCORDION_KEYS = {
   promptSettingsPage: "text-preprocess",
   runDetailsPage: "text-preprocess",
   resultsPage: "text-preprocess",
-  diffExcelPage: "diff-tool",
-  crossExcelPage: "cross-excel-search",
   aiReviewTaskPage: "ai-review-tool",
   aiReviewSettingsPage: "ai-review-tool",
   aiReviewForbiddenPage: "ai-review-tool",
 };
 const TOOL_GUIDES = {
+  feishuTransfer: {
+    title: "飞书文件传输",
+    sections: [
+      ["用途", "按群名选择飞书群聊，将本机文件直接上传到飞书，由信鸽发送附件或群文件文档链接。"],
+      ["开始使用", ["在“设置”中登录公司 memoQ 账号。", "进入“飞书文件传输”，搜索并选择目标群。", "点击“选择文件”或拖入多个文件，核对目标群和文件后确认发送。"]],
+      ["发送方式", ["单文件不超过 30 MB 时，信鸽直接发送群附件。", "超过 30 MB 时，文件分片上传到飞书云空间，原文件链接追加到该群专属云文档，由信鸽发送文档链接。", "同群后续上传复用原文档；确认文档被删除后才重新创建。", "信鸽尚未入群时会先尝试邀请，若需群管理员审批，界面会显示等待状态。"]],
+    ],
+  },
   textPreprocess: {
     title: "文本预处理工具",
     sections: [
@@ -3936,6 +3938,7 @@ function setPage(pageId) {
     pageId = "overviewPage";
   }
   currentPageId = pageId;
+  if (pageId === "feishuTransferPage") transfer.enter();
   document.querySelectorAll(".page-section").forEach((section) => {
     section.classList.toggle("active", section.id === pageId);
   });
@@ -9216,7 +9219,7 @@ async function bindMemoQAccount() {
   $("memoqAccountStatus").classList.remove("error");
   try {
     await api("/api/ai-review/term-bases/memoq/bind", { method: "POST", body: JSON.stringify({ username, password }) });
-    $("memoqPassword").value = ""; await loadMemoQAccountStatus(); await loadReviewTermBases();
+    $("memoqPassword").value = ""; transfer.afterLogin(); await loadMemoQAccountStatus(); await loadReviewTermBases();
   } catch (error) {
     $("memoqAccountStatus").textContent = "绑定失败，请检查账号、密码或 memoQ 服务器连接";
     $("memoqAccountStatus").classList.add("error");
@@ -9252,6 +9255,7 @@ $("bindMemoQButton").addEventListener("click", () => bindMemoQAccount().catch(()
 $("unbindMemoQButton").addEventListener("click", async () => {
   try {
     await api("/api/ai-review/term-bases/memoq/bind", { method: "DELETE" });
+    transfer.logout();
     await loadMemoQAccountStatus();
     await loadReviewTermBases();
   } catch (error) {
@@ -9714,6 +9718,10 @@ setInterval(refreshStatusSafely, 1500);
 from .workspace_ui import THEME_CSS, LANGUAGE_JS
 APP_CSS += THEME_CSS
 APP_JS += LANGUAGE_JS
+_TRANSFER_ASSETS = Path(__file__).resolve().parent / "transfer_assets"
+INDEX_HTML = INDEX_HTML.replace("__TRANSFER_PAGE__", (_TRANSFER_ASSETS / "page.html").read_text(encoding="utf-8"))
+APP_JS += "\n" + (_TRANSFER_ASSETS / "page.js").read_text(encoding="utf-8")
+APP_CSS += "\n" + (_TRANSFER_ASSETS / "page.css").read_text(encoding="utf-8")
 
 if __name__ == "__main__":
     import uvicorn

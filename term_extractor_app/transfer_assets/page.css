@@ -1,0 +1,20 @@
+#feishuTransferPage [hidden]{display:none!important}
+#ftDesk{display:grid;grid-template-columns:minmax(190px,27%) minmax(0,1fr);gap:16px;align-items:start}
+#ftDesk header,#ftDesk footer,.ft-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+#ftDesk h3,#ftConfirm h3{margin:0;overflow-wrap:anywhere}
+#ftSearch,#ftGroups,#ftCompose{margin-top:14px}
+#ftGroups{display:grid;gap:4px;max-height:60vh;overflow:auto}
+#ftGroups button{text-align:left;display:block;white-space:normal;overflow-wrap:anywhere;width:100%;color:var(--ink);background:transparent;border:1px solid transparent}
+#ftGroups small{display:block;color:var(--muted);font-weight:normal}
+#ftGroups button[aria-pressed=true]{background:var(--panel-soft);border-color:var(--line-strong)}
+#ftDrop{border:1px dashed var(--line-strong);border-radius:12px;padding:18px;text-align:center;color:var(--muted)}
+#ftDrop.dragging{outline:2px solid var(--focus);background:var(--panel-soft)}
+.ft-row{padding:12px 0;border-bottom:1px solid var(--line)}
+.ft-row strong,.ft-row small{display:block;overflow-wrap:anywhere}
+.ft-row small,#ftCount{color:var(--muted)}
+#ftDesk footer{margin-top:16px}
+#ftConfirm{margin:auto;position:fixed;inset:0;width:min(90vw,440px);max-height:80vh;height:fit-content;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:14px;padding:24px}
+#ftConfirm::backdrop{background:#0006}
+@media(max-width:850px){#ftDesk{grid-template-columns:minmax(0,1fr)}#ftGroups{max-height:190px}}
+
+.ft-row > div{flex:1;min-width:0}.ft-progress{display:block;width:100%;height:7px;margin:8px 0;accent-color:var(--ink)}

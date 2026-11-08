@@ -46,6 +46,7 @@ html:root .lede{color:var(--muted);font-size:14px}
 html:root :is(.sidebar-nav,.nav-group,.nav-accordion,.nav-accordion[open],.sidebar-footer){background:transparent;box-shadow:none;border-color:var(--line)}
 html:root .nav-accordion{border:0}
 html:root .nav-link,html:root .nav-accordion-summary{color:var(--ink);background:transparent;border:0;border-radius:8px;font-weight:400}
+html:root body button.nav-link-top{font-weight:600}
 html:root .nav-link.active,html:root .nav-link:hover,html:root .nav-accordion-summary:hover{background:var(--selected-bg);color:var(--ink);box-shadow:none}
 /* Neutral is the default action. Only explicit primary actions receive an inverse fill. */
 html:root body button{font-family:var(--font-ui);font-size:13px;font-weight:500;min-height:36px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);box-shadow:none;transform:none;transition:background-color .12s,border-color .12s}
@@ -89,6 +90,24 @@ html:root .tool-guide-card :is(strong,.tool-guide-icon,.tool-guide-arrow){color:
 html:root .tool-guide-card :is(small,.tool-guide-card-footer,.tool-guide-badge){color:var(--muted)}
 html:root .tool-guide-icon{background:var(--panel-soft);border-color:var(--line);box-shadow:none;border-radius:8px}
 html:root .tool-guide-card-footer{border-color:var(--line)}
+html:root .tool-guide-grid{grid-template-columns:repeat(6,minmax(0,1fr));gap:16px}
+html:root body .tool-guide-grid .tool-guide-card{grid-column:span 2;display:flex;flex-direction:column;gap:20px;min-height:210px;padding:22px}
+html:root body .tool-guide-grid .tool-guide-card:nth-child(n+4){grid-column:span 3}
+html:root .tool-guide-card-top{display:flex;align-items:center;justify-content:space-between;min-height:36px}
+html:root .tool-guide-card-copy{display:grid;gap:8px}
+html:root .tool-guide-card-copy strong{font-size:18px;font-weight:600;line-height:1.4}
+html:root .tool-guide-card-copy small{font-size:13px;line-height:1.6}
+html:root .tool-guide-card-footer{margin-top:auto;padding-top:14px}
+@media(max-width:1100px){
+ html:root .tool-guide-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+ html:root body .tool-guide-grid .tool-guide-card:nth-child(n){grid-column:span 1}
+ html:root body .tool-guide-grid .tool-guide-card:last-child{grid-column:1/-1}
+}
+@media(max-width:650px){
+ html:root .tool-guide-grid{grid-template-columns:minmax(0,1fr)}
+ html:root body .tool-guide-grid .tool-guide-card:nth-child(n){grid-column:1;min-height:180px}
+}
+
 html:root :is(.pattern-table-wrap,.review-input-table-wrap,.review-result-table-wrap,.review-detail-table-wrap,.diff-preview-table-wrap){background:var(--panel);border-color:var(--line);box-shadow:none;border-radius:8px}
 html:root :is(table,th,td){border-color:var(--line);color:var(--ink)}
 html:root th{background:var(--panel-soft);color:var(--muted);font-weight:600}

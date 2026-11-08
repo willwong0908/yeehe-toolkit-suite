@@ -22,7 +22,17 @@ excludes = [
     "sklearn",
 ]
 
+import json
+from pathlib import Path
+
+transfer_config = json.loads(Path("feishu-transfer.json").read_text(encoding="utf-8-sig"))
+if set(transfer_config) != {"bot_app_id", "gateway_url"}:
+    raise ValueError("Only public bot_app_id and gateway_url may be packaged")
+
 datas = [
+    ("feishu-transfer.json", "."),
+    ("feishu-transfer-ca.pem", "."),
+    ("term_extractor_app/transfer_assets", "term_extractor_app/transfer_assets"),
     ("settings.json", "."),
     ("logo.png", "."),
 ]

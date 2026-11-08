@@ -1,0 +1,15 @@
+<section id="feishuTransferPage" class="page-section">
+  <p id="ftIdentity" class="hint"></p>
+  <div id="ftGate" class="card"><p id="ftGateHint" role="status">正在验证 memoQ 登录…</p><button class="primary" id="ftLogin" hidden>登录 memoQ</button> <button class="secondary" id="ftReload" hidden>重试</button></div>
+  <div id="ftDesk" hidden>
+    <aside class="card ft-groups"><header><h3>群聊</h3><button id="ftRefresh" class="secondary">刷新</button></header>
+      <input id="ftSearch" type="search" placeholder="搜索群名" aria-label="搜索群名"><div id="ftGroups"></div>
+    </aside>
+    <section class="card ft-files"><header><h3 id="ftTitle">选择一个群聊</h3><span id="ftSender" class="hint"></span></header>
+      <div id="ftCompose" hidden><div id="ftDrop"><p>将文件拖到这里</p><button id="ftPick" class="secondary">选择文件</button><input type="file" id="ftInput" multiple hidden></div>
+        <div id="ftRows"></div><footer><span class="hint" id="ftCount"></span><button class="primary" id="ftSend" disabled>发送文件</button></footer>
+      </div><p role="status" aria-live="polite" id="ftStatus" class="hint"></p><button id="ftStop" class="secondary" hidden>停止等待</button>
+    </section>
+  </div>
+  <dialog id="ftConfirm"><h3 id="ftConfirmTitle"></h3><p id="ftConfirmBody"></p><div class="actions"><button class="secondary" id="ftCancel">取消</button><button class="primary" id="ftAccept">确认发送</button></div></dialog>
+</section>
