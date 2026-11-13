@@ -5617,7 +5617,7 @@ function renderAiReviewResults(task, results) {
       cells = [
         item.source_text || "",
         item.target_text || "",
-        item.verification_pending ? "待核实" : item.has_issue === null ? "" : item.has_issue ? "是" : "否",
+        item.verification_label || (item.has_issue === null ? "" : item.has_issue ? "是" : "否"),
         item.issue_type || "",
         item.error_message || item.issue || "",
         item.suggestion || "",

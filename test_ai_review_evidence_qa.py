@@ -66,7 +66,7 @@ class EvidenceTests(unittest.TestCase):
         response=LLMResponse('qa','candidate_review_batch',json.dumps({'items':[initial],'context_requests':[selector]}),'mock','mock',1,1,True)
         send=AsyncMock(return_value=LLMResponse('qa','candidate_review_batch',json.dumps({'items':[checked]}),'mock','mock',1,1,True))
         value=asyncio.run(evidence.verify_response(request,response,index=self.index,send=send,config=self.config,parse=review._parse_json_object,validate=review._validate_response_items))
-        self.assertEqual(send.await_count,1)
+        self.assertIn(send.await_count,(1,2))
         return json.loads(value.content)['items'][0]
 
     def test_withdrawal_without_real_evidence_is_rejected(self):
@@ -85,6 +85,50 @@ class EvidenceTests(unittest.TestCase):
         value=self.run_verify(result('a',False),result('a',False),{'item_id':'a','kind':'search','query':'absent','reason':'是否有例外'})
         self.assertTrue(value['_verification']['unresolved'])
         self.assertFalse(self.index.cache_valid(self.items[0],value))
+        self.assertEqual(evidence.verification_display(value['_verification'],False)[0],'复核未完成')
+
+    def test_retry_receives_full_independent_timeout(self):
+        limits = []
+        async def timed(awaitable, timeout):
+            limits.append(timeout)
+            if len(limits) == 1:
+                awaitable.close()
+                raise asyncio.TimeoutError
+            return await awaitable
+        with patch.object(asyncio,'wait_for',timed):
+            value=self.run_verify(result('a'),result('a',verification_reason='名称保持一致',
+                source_quote='简体中文',target_quote='简体中文'))
+        self.assertEqual(limits,[90,90])
+        self.assertEqual(value['_verification']['status'],'resolved')
+
+    def test_official_name_requires_matching_term_not_self_quote(self):
+        selector={'item_id':'a','kind':'terms','query':'简体中文','reason':'简体中文是否是项目官方名称？',
+                  'requires_project_term':True}
+        checked=result('a',verification_reason='当前句写作简体中文',source_quote='简体中文',target_quote='简体中文')
+        audit=self.run_verify(result('a'),checked,selector)['_verification']
+        label,detail=evidence.verification_display(audit,False)
+        self.assertEqual(label,'需项目确认')
+        self.assertIn('简体中文',detail)
+        self.assertFalse(self.index.cache_valid(self.items[0],{'_verification':audit}))
+        self.index.terms=[{'source':'简体中文','target':'简体中文'}]
+        entry=self.index.lookup(self.items[0],selector)[0]['records'][0]
+        checked.update(evidence_refs=[entry['ref']],verification_reason='术语库登记译名与当前译文一致')
+        audit=self.run_verify(result('a'),checked,selector)['_verification']
+        label,detail=evidence.verification_display(audit,False)
+        self.assertEqual(label,'否')
+        self.assertIn('项目术语：简体中文 → 简体中文',detail)
+        self.assertIn(selector['reason'],detail)
+
+    def test_text_alone_resolves_and_project_question_preserves_consequence(self):
+        value=self.run_verify(result('a'),result('a',verification_reason='原译均为简体中文',
+            source_quote='简体中文',target_quote='简体中文'))
+        self.assertFalse(value['_verification']['unresolved'])
+        value=self.run_verify(result('a'),result('a',verification_reason='缺少项目约定',
+            project_question='频道名称是否使用各语言自称？',decision_impact='若要求自称，保留简体中文。'))
+        label, detail=evidence.verification_display(value['_verification'],False)
+        self.assertEqual(label,'需项目确认')
+        self.assertIn('是否使用各语言自称',detail)
+        self.assertIn('保留简体中文',detail)
 
     def test_suggestion_integrity_without_assuming_marker_grammar(self):
         row={'source_text':'{Ready} 原文','target_text':'{Ready} '+('First paragraph. '*20)+'\nSecond paragraph.'}
@@ -113,7 +157,7 @@ class LearningQATests(unittest.TestCase):
         self.assertEqual(learning.cached_results(self.session,['k0']),{})
         self.assertTrue(review.get_review_results('t')[0]['verification_pending'])
         book=load_workbook(output_service.generate_review_excel('t'))
-        self.assertEqual(book['审校结果']['F2'].value,'待核实');book.close()
+        self.assertEqual(book['审校结果']['F2'].value,'复核未完成');book.close()
 
     def question_reply(self):
         return db.dumps_json({'protocol':2,'new_rules':[],'triggered_ids':[],

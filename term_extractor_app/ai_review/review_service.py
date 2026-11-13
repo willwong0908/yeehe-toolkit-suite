@@ -8,7 +8,6 @@ import logging
 import sqlite3
 import traceback
 import threading
-import time
 import uuid
 from typing import Any
 
@@ -22,7 +21,7 @@ from .session_store import emit_event
 from .term_base_service import get_term_base, match_terms
 from .memoq_service import lookup_terms_snapshot, MemoQError
 from .learning_service import cached_results, cache_results, memory_snapshot, memory_prompt, options
-from .evidence_service import EvidenceIndex, EVIDENCE_INSTRUCTION, suggestion_problem, verify_response
+from .evidence_service import EvidenceIndex, EVIDENCE_INSTRUCTION, suggestion_problem, verification_display, verify_response
 from ..models import LLMRequest, LLMResponse
 from ..logging_utils import LOGGER_NAME, configure_file_logger
 from ..providers import ProviderRegistry
@@ -971,6 +970,8 @@ async def _run_review_packages(
         )
 
     original_send_prompt = adapter.send_prompt
+    call_timeout = max(10, int(provider_settings.timeout_seconds or 90))
+    package_timeout = call_timeout * 3 + 5 if config.get('evidence_enabled') else call_timeout
 
     async def logged_send_prompt(request: LLMRequest, attempt: int = 1) -> LLMResponse:
         package_index = int(request.metadata.get("package_index") or 0)
@@ -991,14 +992,17 @@ async def _run_review_packages(
             ),
         )
         try:
-            attempt_started=time.monotonic()
-            response = await original_send_prompt(request, attempt=attempt)
+            try:
+                response = await asyncio.wait_for(original_send_prompt(request, attempt=attempt), call_timeout)
+            except asyncio.TimeoutError:
+                return LLMResponse(request.task_id, request.task_type, '', provider_name, model,
+                                   call_timeout * 1000, attempt, False, '初审超时', 'timeout', True)
             if config.get('evidence_enabled') and response.success:
                 response = await verify_response(
                     request, response, index=evidence_index, send=original_send_prompt,
                     config=config, parse=_parse_json_object, validate=_validate_response_items,
                     log=lambda message: _add_log(task_id, 'info', message),
-                    timeout_seconds=min(30,max(0,int(provider_settings.timeout_seconds or 90)-3-(time.monotonic()-attempt_started))),
+                    timeout_seconds=call_timeout,
                 )
         except Exception as exc:
             _add_log(
@@ -1037,7 +1041,7 @@ async def _run_review_packages(
         max_retries=2,
         stop_requested=lambda: False,
         response_validator=validate_response,
-        attempt_timeout_seconds=max(10, int(provider_settings.timeout_seconds or 90)),
+        attempt_timeout_seconds=package_timeout,
         on_retry=on_retry,
     )
     try:
@@ -1056,7 +1060,7 @@ async def _run_review_packages(
                 request=request,
                 failed_response=failed_response,
                 response_validator=validate_response,
-                timeout_seconds=min(60, max(10, int(provider_settings.timeout_seconds or 90))),
+                timeout_seconds=package_timeout,
             )
             if recovered_response.success:
                 _add_log(task_id, "warning", f"第 {package_index}/{len(packages)} 包已通过最终 AI 兜底纠错。")
@@ -1894,6 +1898,7 @@ def _task_to_dict(row: Any) -> dict[str, Any]:
 
 def _result_to_dict(row: Any) -> dict[str, Any]:
     verification=(loads_json(row['raw_result_json'],{}).get('_verification') or {}) if 'raw_result_json' in row.keys() else {}
+    label, detail = verification_display(verification, bool(row['has_issue']))
     return {
         "id": row["id"],
         "item_id": row["item_id"],
@@ -1901,7 +1906,8 @@ def _result_to_dict(row: Any) -> dict[str, Any]:
         "has_issue": bool(row["has_issue"]) if row["has_issue"] is not None else None,
         "verification_pending": bool(verification.get('unresolved')) and not bool(row['has_issue']),
         "issue_type": row["issue_type"],
-        "issue": row["issue"],
+        "verification_label": label,
+        "issue": '\n'.join(filter(None, [row["issue"], detail])),
         "suggestion": row["suggestion"],
         "checks": loads_json(row["directional_checks_json"], {}),
         "error_message": row["error_message"],

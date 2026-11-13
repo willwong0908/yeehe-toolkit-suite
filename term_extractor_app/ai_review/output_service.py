@@ -14,6 +14,7 @@ import uuid
 
 from .config import OUTPUTS_DIR, ensure_directories
 from .database import get_connection, loads_json
+from .evidence_service import verification_display
 
 
 NORMAL_HEADERS = [
@@ -99,11 +100,11 @@ def generate_review_excel(task_id: str) -> Path:
         elif row["has_issue"] is not None:
             has_issue = "是" if row["has_issue"] else "否"
         verification=loads_json(row['raw_result_json'],{}).get('_verification') or {}
-        if verification.get('unresolved') and not row['has_issue'] and row['status']!='failed':
-            has_issue='待核实'
         issue = row["error_message"] or row["issue"] or ""
-        if has_issue=='待核实':
-            issue='查证资料不足或复核未完成，请核实当前疑点。'+str(verification.get('reason') or '')
+        label, detail = verification_display(verification, bool(row["has_issue"]))
+        if label and row['status'] != 'failed':
+            has_issue = label
+            issue = '\n'.join(filter(None, [issue, detail]))
         values = [
             row["source_file"],
             location,
